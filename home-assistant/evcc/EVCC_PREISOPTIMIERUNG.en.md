@@ -18,9 +18,21 @@ When enabled, the automation calculates price limits and a battery target daily 
 - Wallboxes: the cutoff for the four cheapest hours in total. The same value is applied to SynBox-01 and SynBox-02.
 - Home battery: the target state of charge accounts for the previous night's average consumption, the solar forecast from 08:00 to 22:00, and a minimum 20% reserve for the 22:00–08:00 period. This plans enough energy for overnight use while leaving room for expected PV generation. The current battery state of charge and capacity are included. Required grid-charging time is converted into the cheapest planner intervals using an assumed maximum charging power of 10.8 kW.
 
-Price thresholds are converted from the EPEX forecast to the configured gross price using the configured surcharge and VAT: `(EPEX price + EUR 0.18/kWh) × 1.19`. The result is then rounded up to evcc's 0.005 EUR/kWh step size. In Smart mode, evcc charges from the grid when the planner price does not exceed the relevant limit. Once the battery target is reached, Home Assistant sets evcc's temporary **lock charging** mode every 30 seconds; the mode expires automatically after 60 seconds. The lock is not renewed while the battery is below its target and is cleared at 08:00.
+The evcc planner forecast already includes surcharges and VAT (gross price) and is used unchanged. The thresholds are rounded up to evcc's 0.005 EUR/kWh step size. In Smart mode, evcc charges from the grid when the planner price does not exceed the relevant limit. Once the battery target is reached, Home Assistant sets evcc's temporary **lock charging** mode every 30 seconds; the mode expires automatically after 60 seconds. The lock is not renewed while the battery is below its target and is cleared at 08:00.
 
 At 08:00, Home Assistant stores the average house power from the previous ten hours as the consumption estimate for the next night. On the first run, it uses the 24-hour average instead. The assumed charging power is a measured peak; if actual charging power is lower, evcc may need more low-price intervals. If a forecast is unavailable, has too few intervals, or produces invalid price limits, existing price limits are left unchanged and the battery target is set to 0. Changing the switch takes effect at the next 22:00 calculation.
+
+## Discharge hold for price peaks
+
+While the **evcc Price Optimization Enabled** switch is on, a further automation checks every 30 seconds whether home-battery discharging should be blocked. It assigns the remaining energy above 20% to the most expensive intervals of the next 24 hours. Grid import per interval is the average house load (`sensor.evcc_hausleistung_24h_mittel`) minus the PV forecast. The lowest price among those intervals is the peak-price threshold.
+
+- Discharging is blocked (evcc mode `hold`) when the battery is at or below 50%, discharges at more than 100 W, and the current price is more than EUR 0.02/kWh below the threshold.
+- The block is renewed every 30 seconds because evcc resets the mode after 60 seconds.
+- It is released when the current price reaches the threshold, or the state of charge drops below 20% or rises above 50%.
+- The helper `input_boolean.evcc_battery_discharge_hold` records that the block was set by this automation. Only then is it released again.
+- If the night charge guard has set `holdcharge`, the automation does not intervene.
+
+The start limit (50%), reserve (20%), and margin (EUR 0.02/kWh) are variables at the top of the automation.
 
 ## Flow
 
@@ -56,3 +68,6 @@ The helpers are defined in `configuration.yaml`; the automations are in `automat
 - `select.synboxen_battery_mode`
 - `input_number.evcc_night_consumption_kwh`
 - `input_number.evcc_battery_target_soc`
+- `sensor.synboxen_battery_power`
+- `sensor.evcc_hausleistung_24h_mittel`
+- `input_boolean.evcc_battery_discharge_hold`
