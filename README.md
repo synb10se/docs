@@ -7,6 +7,7 @@ supplementary references.
 
 ## Home Assistant
 
+- [Buderus MX400 Local API and evcc (Deutsch)](home-assistant/evcc/BUDERUS_MX400_LOCAL.md)
 - [EVCC price optimization (Deutsch)](home-assistant/evcc/EVCC_PREISOPTIMIERUNG.md)
 - [EVCC price optimization (English)](home-assistant/evcc/EVCC_PREISOPTIMIERUNG.en.md)
 - [Leapmotor integration guide](home-assistant/leapmotor/README.md)
