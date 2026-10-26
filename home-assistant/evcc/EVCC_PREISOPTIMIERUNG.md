@@ -7,22 +7,25 @@
 - Der evcc Planner-Tarif muss auf Strompreise eingestellt sein.
 - Die Entities `sensor.synboxen_forecast_planner` und `sensor.synboxen_forecast_solar` sind in Home Assistant aktiviert. Der Solar-Standortforecast von evcc sollte die in evcc eingerichteten Prognosen beider Dachflächen (SynSolar und SynSolar+) enthalten.
 - Die Smart-Preisgrenzen von SynBox-01, SynBox-02 und der Hausbatterie müssen in evcc verfügbar sein.
+- Der Helper `input_number.evcc_wallbox_cost_limit` muss aus `configuration.yaml` geladen sein. Er speichert den geplanten Wallbox-Grenzwert.
 - Die Entität `select.synboxen_battery_mode` muss aktiviert sein, damit Home Assistant die zeitlich begrenzte Ladesperre erneuern kann.
 
 ## Bedienung
 
 Der Schalter **evcc Preisoptimierung aktiv** (`input_boolean.evcc_smart_price_optimizer`) aktiviert oder pausiert die Automation. Er befindet sich unter den Helfern. Ein neu angelegter Schalter startet aus; Home Assistant stellt danach seinen letzten Zustand bei Neustarts wieder her.
 
-Ist der Schalter eingeschaltet, berechnet die Automation täglich um 23:55 Uhr Preisgrenzen und ein Nachtziel für den Folgetag. Die EPEX-Day-ahead-Daten liegen dann typischerweise bereits vor. Die Preisoptimierung wertet das rollierende Zeitfenster der nächsten 24 Stunden aus:
+Ist der Schalter eingeschaltet, berechnet die Automation täglich um 23:55 Uhr Preisgrenzen und ein Nachtziel für den Folgetag. Eine manuelle Ausführung berechnet die Werte sofort neu. Die EPEX-Day-ahead-Daten liegen um 23:55 Uhr typischerweise bereits vor. Die Preisoptimierung wertet das rollierende Zeitfenster der nächsten 24 Stunden aus:
 
-- Wallboxen: Cutoff der günstigsten insgesamt vier Stunden. Derselbe Wert wird auf SynBox-01 und SynBox-02 gesetzt.
+- Wallboxen: Cutoff der günstigsten insgesamt vier Stunden außerhalb prognostizierter PV-Überschussintervalle. Ein Intervall wird dafür ausgelassen, wenn die Solarprognose die mittlere Hausleistung um mehr als 500 W übersteigt. Der berechnete Wert wird in `input_number.evcc_wallbox_cost_limit` gespeichert; die wirksamen evcc-Grenzen steuert eine separate Minuten-Automation.
 - Hausbatterie: Der Ziel-Ladezustand berücksichtigt den durchschnittlichen Verbrauch der letzten Nacht, die aggregierte Solarprognose beider Dachflächen für den Folgetag von 08:00 bis 22:00 und eine Mindestreserve von 20 % für den Zeitraum 22:00 bis 08:00. So wird genug nächtliche Energie eingeplant und zugleich Platz für den erwarteten PV-Ertrag gelassen. Der aktuelle Ladezustand und die Kapazität der Batterie werden berücksichtigt. Der Ladebedarf wird mit einer angenommenen Netz-Ladeleistung von 10,8 kW in die günstigsten Planner-Intervalle umgerechnet.
 
-Der evcc-Planner-Forecast enthält bereits Aufschläge und MwSt. (Bruttopreis) und wird daher unverändert verwendet. Die Grenzwerte werden anschließend auf evccs Schrittweite von 0,005 €/kWh aufgerundet. evcc lädt im Modus „Smart“ aus dem Netz, wenn der Planner-Preis die jeweilige Grenze nicht überschreitet. Sobald das Batterie-Ziel erreicht ist, setzt Home Assistant alle 30 Sekunden den evcc-Modus „Laden sperren“, der automatisch nach 60 Sekunden ausläuft. Unterhalb des Ziels wird die Sperre nicht erneuert; um 08:00 wird eine bestehende Sperre aufgehoben.
+Der evcc-Planner-Forecast enthält bereits Aufschläge und MwSt. (Bruttopreis) und wird daher unverändert verwendet. Die Grenzwerte werden anschließend auf evccs Schrittweite von 0,005 €/kWh aufgerundet. evcc lädt im Modus „Smart“ aus dem Netz, wenn der Planner-Preis die jeweilige Grenze nicht überschreitet. Die Wallbox-PV-Automation sperrt die Netzladung bei mehr als 500 W gemessenem PV-Überschuss, indem sie beide Smart-Grenzen auf `-0,5` setzt. Unter 200 W Überschuss stellt sie den geplanten Wert aus `input_number.evcc_wallbox_cost_limit` wieder her. Die Hysterese verhindert häufiges Umschalten. Die aktuelle Überschussleistung wird als `sensor.synboxen_pv_power` minus `sensor.synboxen_home_power` berechnet.
 
-Um 08:00 speichert Home Assistant den aus der Hausleistung berechneten Verbrauch der vergangenen zehn Stunden als Basis. Um 23:55 wird dieser Wert auf die verbleibenden Stunden bis 08:00 skaliert. Zusätzlich erfassen drei 7-Tage-Statistiken nachts die Fronius-Hausleistung bei laufenden bzw. inaktiven Home-Connect-Geräten und die Zahl aktiver Geräte. Erst bei mindestens 99 % Zeitabdeckung wird daraus die typische Zusatzleistung pro Gerät geschätzt und mit den Restlaufzeiten aktiver Programme bis 08:00 hochgerechnet. Bis dahin bleibt die bisherige Verbrauchsschätzung aktiv. Beim ersten Lauf wird statt des gespeicherten Nachtwerts der 24-Stunden-Mittelwert verwendet. Die angenommene Ladeleistung ist ein gemessener Spitzenwert; ist die tatsächliche Ladeleistung niedriger, kann evcc mehr günstige Intervalle benötigen. Bei fehlendem Forecast, zu wenigen Prognoseintervallen oder ungültigen Preisgrenzen bleiben die bisherigen Preisgrenzen unverändert und das Nachtziel wird auf 0 gesetzt. Das Ändern des Schalters wirkt bei der nächsten Berechnung.
+Der Batterie-Scheduler prüft jede Minute, ob noch günstige Planner-Intervalle bis zum geplanten Batteriepreis verbleiben. Er gibt das Netzladelimit erst frei, wenn die verbleibende günstige Zeit nur noch knapp für die benötigte Ladezeit bei 10,8 kW plus 30 Minuten Reserve reicht. Netzladung wird nicht gestartet, solange der gemessene PV-Überschuss über der Hysterese liegt. Sobald das Batterie-Ziel erreicht ist, setzt Home Assistant alle 30 Sekunden den evcc-Modus „Laden sperren“, der automatisch nach 60 Sekunden ausläuft. Unterhalb des Ziels wird die Sperre nicht erneuert; um 08:00 wird eine bestehende Sperre aufgehoben.
 
-Der Lauf um 23:55 legt nur den geplanten Netzladepreis in `input_number.evcc_battery_grid_charge_price` ab. Eine weitere Automation prüft jede Minute, wie viele Minuten mit einem Preis bis zu diesem Limit noch vor uns liegen. Das evcc-Netzladelimit wird erst freigegeben, wenn diese Zeit nur noch knapp (Ladedauer bei 10,8 kW plus 30 Minuten Reserve) für das Batterieziel reicht, und danach wieder deaktiviert. So versorgt die Batterie bei langen günstigen Phasen das Haus und wird erst kurz vor deren Ende aufgeladen, statt dauerhaft in `charge` zu stehen.
+Um 08:00 speichert Home Assistant den aus der Hausleistung berechneten Verbrauch der vergangenen zehn Stunden als Basis. Um 23:55 wird dieser Wert auf die verbleibenden Stunden bis 08:00 skaliert. Zusätzlich erfassen drei 7-Tage-Statistiken nachts die Fronius-Hausleistung bei laufenden bzw. inaktiven Home-Connect-Geräten und die Zahl aktiver Geräte. Erst bei mindestens 99 % Zeitabdeckung wird daraus die typische Zusatzleistung pro Gerät geschätzt und mit den Restlaufzeiten aktiver Programme bis 08:00 hochgerechnet. Bis dahin bleibt die bisherige Verbrauchsschätzung aktiv. Beim ersten Lauf wird statt des gespeicherten Nachtwerts der 24-Stunden-Mittelwert verwendet. Die angenommene Ladeleistung ist ein gemessener Spitzenwert; ist die tatsächliche Ladeleistung niedriger, kann evcc mehr günstige Intervalle benötigen. Fehlt die Solarprognose oder enthält sie zu wenige Intervalle, berechnet die Batterieoptimierung das Ziel ohne PV-Aufnahmepuffer weiter (mindestens Nachtverbrauch plus 20 % Reserve). Planner-Ausfall oder unzureichende günstige Intervalle können dagegen verhindern, dass ein neuer Preisgrenzwert geschrieben wird; in diesem Fall bleibt der zuletzt gespeicherte Wert erhalten. Das Ändern des Schalters wirkt bei der nächsten Berechnung.
+
+Der Lauf um 23:55 legt den geplanten Batterie-Netzladepreis in `input_number.evcc_battery_grid_charge_price` und den geplanten Wallbox-Grenzwert in `input_number.evcc_wallbox_cost_limit` ab. Die Helper sind Planwerte, nicht zwingend die gerade aktiven evcc-Grenzen. Die Wallbox-Grenzen stehen in `number.synboxen_synbox_01_smart_cost_limit` und `number.synboxen_synbox_02_smart_cost_limit`; bei PV-Überschuss können sie vorübergehend auf `-0,5` stehen. Den Zustand und die Helper-Werte können Sie in Home Assistant unter **Entwicklerwerkzeuge → Zustände** prüfen. Eine manuelle Ausführung der täglichen Automation berechnet die Planwerte sofort neu.
 
 ## Entladesperre für Preisspitzen
 
@@ -40,12 +43,13 @@ Startgrenze (50 %), Reserve (20 %) und Abstand (0,02 €/kWh) stehen als Variabl
 
 ```mermaid
 flowchart TD
-	A[23:55: Optimierung aktiv] --> B[Planner- und Solarprognose lesen]
+	A[23:55 oder manuelle Ausführung] --> B[Planner- und Solarprognose lesen]
 	B --> C[Nachtverbrauch lesen; erster Lauf nutzt 24-h-Mittel]
 	C --> D[Ziel berechnen: mindestens 20 % plus Nachtverbrauch]
 	D --> E[PV-Aufnahmeraum von 08:00 bis 22:00 berücksichtigen]
 	E --> F[Netz-Ladezeit mit 10,8 kW schätzen]
-	F --> G[Preisgrenze aus den günstigsten Intervallen setzen]
+	F --> G[Planwerte berechnen; PV-Überschussintervalle auslassen]
+	G --> N[Wallbox-Grenzen bei gemessenem PV-Überschuss sperren]
 	G --> H{Batterie-Ziel erreicht?}
 	H -- Nein --> I[Smart-Netzladung zulassen]
 	H -- Ja --> J[holdcharge setzen; alle 30 Sekunden erneuern]
@@ -69,7 +73,11 @@ Der Helper ist in `configuration.yaml` definiert; die Automation liegt in `autom
 - `sensor.synboxen_battery_capacity`
 - `select.synboxen_battery_mode`
 - `input_number.evcc_night_consumption_kwh`
+- `input_number.evcc_wallbox_cost_limit`
+- `input_number.evcc_battery_grid_charge_price`
 - `input_number.evcc_battery_target_soc`
+- `sensor.synboxen_pv_power`
+- `sensor.synboxen_home_power`
 - `sensor.synboxen_battery_power`
 - `sensor.evcc_hausleistung_24h_mittel`
 - `input_boolean.evcc_battery_discharge_hold`
