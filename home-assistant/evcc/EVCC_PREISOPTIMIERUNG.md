@@ -23,11 +23,41 @@ Der evcc-Planner-Forecast enthält bereits Aufschläge und MwSt. (Bruttopreis) u
 
 Der Batterie-Scheduler prüft jede Minute, ob noch günstige Planner-Intervalle bis zum geplanten Batteriepreis verbleiben. Er gibt das Netzladelimit erst frei, wenn die verbleibende günstige Zeit bis zum nächsten 08:00 nur noch knapp für die benötigte Ladezeit bei 10,8 kW plus 30 Minuten Reserve reicht. So verzögern günstige Intervalle nach dem Nachtladefenster die Ladung nicht. Netzladung wird nicht gestartet, solange der gemessene PV-Überschuss über der Hysterese liegt. Sobald das Batterie-Ziel erreicht ist, setzt Home Assistant alle 30 Sekunden den evcc-Modus „Laden sperren“, der automatisch nach 60 Sekunden ausläuft. Unterhalb des Ziels wird die Sperre nicht erneuert; um 08:00 wird eine bestehende Sperre aufgehoben.
 
-Das Sidebar-Dashboard **EVCC Energie** zeigt Tageswerte in kWh der letzten 14 Tage für Hausverbrauch ohne Wallboxen, Wallbox-Ladeenergie, Netzbezug, Batterieentladung und PV-Produktion. Ein ApexCharts-Diagramm überlagert die Energie je 15-Minuten-Intervall mit dem evcc-Planner-Preis als transparente Fläche auf einer eigenen €/kWh-Achse. Die Wallbox-Leistung wird für die Hausverbrauchsstatistiken vom evcc-Hausleistungswert abgezogen.
+Das Sidebar-Dashboard **Energiestatistiken** visualisiert Verbrauch, Erzeugung und Netzpreis; Details stehen im Abschnitt [Dashboard Energiestatistiken](#dashboard-energiestatistiken). Die Wallbox-Leistung wird für die Hausverbrauchsstatistiken vom evcc-Hausleistungswert abgezogen.
 
 Um 08:00 speichert Home Assistant den aus der Hausleistung berechneten Verbrauch der vergangenen zehn Stunden als Basis. Um 23:55 wird dieser Wert auf die verbleibenden Stunden bis 08:00 skaliert. Zusätzlich erfassen drei 7-Tage-Statistiken nachts die evcc-Hausleistung (ohne Wallboxen) bei laufenden bzw. inaktiven Home-Connect-Geräten und die Zahl aktiver Geräte. Erst bei mindestens 99 % Zeitabdeckung wird daraus die typische Zusatzleistung pro Gerät geschätzt und mit den Restlaufzeiten aktiver Programme bis 08:00 hochgerechnet. Bis dahin bleibt die bisherige Verbrauchsschätzung aktiv. Beim ersten Lauf wird statt des gespeicherten Nachtwerts der 24-Stunden-Mittelwert verwendet. Die angenommene Ladeleistung ist ein gemessener Spitzenwert; ist die tatsächliche Ladeleistung niedriger, kann evcc mehr günstige Intervalle benötigen. Fehlt die Solarprognose oder enthält sie zu wenige Intervalle, berechnet die Batterieoptimierung das Ziel ohne PV-Aufnahmepuffer weiter (mindestens Nachtverbrauch plus 10 % Notstromreserve). Planner-Ausfall oder unzureichende günstige Intervalle können dagegen verhindern, dass ein neuer Preisgrenzwert geschrieben wird; in diesem Fall bleibt der zuletzt gespeicherte Wert erhalten. Das Ändern des Schalters wirkt bei der nächsten Berechnung.
 
 Der Lauf um 23:55 legt den geplanten Batterie-Netzladepreis in `input_number.evcc_battery_grid_charge_price` und den geplanten Wallbox-Grenzwert in `input_number.evcc_wallbox_cost_limit` ab. Die Helper sind Planwerte, nicht zwingend die gerade aktiven evcc-Grenzen. Die Wallbox-Grenzen stehen in `number.synboxen_synbox_01_smart_cost_limit` und `number.synboxen_synbox_02_smart_cost_limit`; bei PV-Überschuss können sie vorübergehend auf `-0,5` stehen. Den Zustand und die Helper-Werte können Sie in Home Assistant unter **Entwicklerwerkzeuge → Zustände** prüfen. Eine manuelle Ausführung der täglichen Automation berechnet die Planwerte sofort neu.
+
+## Dashboard Energiestatistiken
+
+Das Dashboard ist in `lovelace_evcc_energie.yaml` definiert und wird in `configuration.yaml` unter `lovelace.dashboards.evcc-energie` als YAML-Dashboard eingebunden. Es besteht aus einer Panel-Ansicht (volle Breite) mit zwei untereinander angeordneten ApexCharts-Karten. Eine grafische Bearbeitung in Home Assistant ist für YAML-Dashboards nicht möglich; Änderungen erfolgen in der Datei und wirken nach dem Neuladen der Seite.
+
+| Karte | Zeitraum | Inhalt |
+| --- | --- | --- |
+| 14-Tage-Verbrauchsstatistik (kWh) | letzte 14 Tage, Tageswerte, Säulen | Hausverbrauch ohne Wallboxen, Wallboxen, Netzbezug, Batterieentladung, PV-Produktion |
+| 24-Stunden-Energieverbrauch und Netzpreis (15 min) | letzte 24 Stunden, je 15 Minuten | dieselben Größen als Energiedifferenz je Intervall; der Netzpreis (`sensor.synboxen_forecast_planner`) als Fläche auf einer eigenen €/kWh-Achse |
+
+Die Tageswerte stammen aus den Langzeitstatistiken (`statistics` mit `type: change`, `period: day`). Die 24-Stunden-Karte berechnet die Differenz (`group_by.func: delta`) aus dem Verlauf. Die Wallbox-Energie stammt in der Tagesansicht aus `sensor.evcc_wallbox_energy_total`, in der 24-Stunden-Ansicht aus `sensor.evcc_wallbox_energy_integrated` (Integration der Wallbox-Leistung); beide Werte können leicht abweichen. Voraussetzung ist, dass alle verwendeten Entitäten Langzeitstatistiken führen (`state_class` gesetzt).
+
+### Bedienung
+
+- Ein Klick auf einen Legendeneintrag blendet die Serie dauerhaft aus bzw. wieder ein (`apex_config.legend.onItemClick.toggleDataSeries`).
+- Das Überfahren eines Legendeneintrags hebt die Serie hervor (`apex_config.legend.onItemHover.highlightDataSeries`).
+- Ausgeblendete Serien werden bei einer Aktualisierung (`update_interval`) möglicherweise wieder eingeblendet.
+
+### Anpassung
+
+| Einstellung | Ort in der YAML-Datei |
+| --- | --- |
+| Diagrammhöhe (Standard 420 px) | `apex_config.chart.height` je Karte |
+| Serienfarbe | `color` je Serie |
+| Flächen-/Liniendarstellung | `type` (`area`, `line`, `column`) je Serie |
+| Linienstärke, Flächendeckkraft | `stroke_width`, `opacity` je Serie |
+| Aktualisierung | `update_interval` je Karte |
+| Zeitraum der Tagesansicht | `graph_span` der ersten Karte |
+
+Die Karte `custom:apexcharts-card` muss als Dashboard-Ressource `/local/apexcharts-card.js?v=2.2.3` (Typ **JavaScript-Modul**) unter **Einstellungen → Dashboards → Ressourcen** registriert sein. Der Eintrag unter `lovelace.resources` in `configuration.yaml` genügt im Storage-Modus nicht; fehlt die Ressource, zeigt die Karte „Konfigurationsfehler“. Ein globales `chart_type` auf Kartenebene überschreibt die `type`-Angaben der einzelnen Serien und sollte nicht gesetzt werden.
 
 ## Entladesperre für Preisspitzen
 

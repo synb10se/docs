@@ -23,11 +23,41 @@ The evcc planner forecast already includes surcharges and VAT (gross price) and 
 
 The battery scheduler checks every minute how many planner minutes remain at or below the planned battery price. It releases the grid-charge limit only when the remaining cheap time through the next 08:00 is barely enough for the required charging time at 10.8 kW plus a 30-minute reserve. Cheap intervals after the overnight charging window no longer delay charging. Grid charging is not started while measured PV surplus remains above the hysteresis threshold. Once the battery target is reached, Home Assistant sets evcc's temporary **lock charging** mode every 30 seconds; the mode expires automatically after 60 seconds. The lock is not renewed while the battery is below its target and is cleared at 08:00.
 
-The **EVCC Energie** sidebar dashboard shows daily kWh totals for the last 14 days for house consumption excluding wallboxes, wallbox charging, grid import, battery discharge, and PV production. An ApexCharts graph overlays energy per 15-minute interval with the evcc planner price as a translucent area on its own €/kWh axis. Wallbox power is subtracted from evcc house power for the house-consumption statistics.
+The **Energiestatistiken** sidebar dashboard visualizes consumption, generation, and grid price; see [Energy statistics dashboard](#energy-statistics-dashboard) for details. Wallbox power is subtracted from evcc house power for the house-consumption statistics.
 
 At 08:00, Home Assistant stores the house-power average from the previous ten hours as a baseline. At 23:55 this value is scaled to the remaining hours until 08:00. Three seven-day statistics also track evcc house power (excluding wallboxes) at night while Home Connect appliances are active or idle, and the number of active appliances. Only after at least 99% time coverage is available does the automation estimate typical incremental power per appliance and project it using the remaining program times until 08:00. Until then, it uses the existing consumption estimate. On the first run, it uses the 24-hour average instead of a saved night value. The assumed charging power is a measured peak; if actual charging power is lower, evcc may need more low-price intervals. If the solar forecast is missing or has too few intervals, the battery target is still calculated without a PV-headroom allowance (at least overnight consumption plus the 10% emergency reserve). A planner outage or too few qualifying cheap intervals can prevent a new price limit from being written; the last stored value is retained. Changing the switch takes effect at the next calculation.
 
 The 23:55 run stores the planned battery grid-charge price in `input_number.evcc_battery_grid_charge_price` and the planned wallbox limit in `input_number.evcc_wallbox_cost_limit`. These helpers are plan values, not necessarily the currently active evcc limits. The wallbox limits are `number.synboxen_synbox_01_smart_cost_limit` and `number.synboxen_synbox_02_smart_cost_limit`; during PV surplus they may temporarily be `-0.5`. Check the values and states in Home Assistant under **Developer Tools → States**. Manually running the daily automation recalculates the plan values immediately.
+
+## Energy statistics dashboard
+
+The dashboard is defined in `lovelace_evcc_energie.yaml` and registered as a YAML dashboard in `configuration.yaml` under `lovelace.dashboards.evcc-energie`. It is a full-width panel view with two ApexCharts cards stacked vertically. YAML dashboards cannot be edited graphically in Home Assistant; edit the file and reload the page.
+
+| Card | Period | Content |
+| --- | --- | --- |
+| 14-Tage-Verbrauchsstatistik (kWh) | last 14 days, daily totals, columns | house consumption excluding wallboxes, wallboxes, grid import, battery discharge, PV production |
+| 24-Stunden-Energieverbrauch und Netzpreis (15 min) | last 24 hours, per 15 minutes | the same quantities as energy difference per interval; grid price (`sensor.synboxen_forecast_planner`) as an area on its own €/kWh axis |
+
+Daily values come from long-term statistics (`statistics` with `type: change`, `period: day`). The 24-hour card calculates the difference (`group_by.func: delta`) from history. Wallbox energy comes from `sensor.evcc_wallbox_energy_total` in the daily view and from `sensor.evcc_wallbox_energy_integrated` (integrated wallbox power) in the 24-hour view; the two may differ slightly. All entities used must keep long-term statistics (`state_class` set).
+
+### Usage
+
+- Clicking a legend entry permanently hides or shows the series (`apex_config.legend.onItemClick.toggleDataSeries`).
+- Hovering over a legend entry highlights the series (`apex_config.legend.onItemHover.highlightDataSeries`).
+- Hidden series may reappear on a refresh (`update_interval`).
+
+### Customization
+
+| Setting | Location in the YAML file |
+| --- | --- |
+| Chart height (default 420 px) | `apex_config.chart.height` per card |
+| Series color | `color` per series |
+| Area/line/column rendering | `type` (`area`, `line`, `column`) per series |
+| Line width, area opacity | `stroke_width`, `opacity` per series |
+| Refresh | `update_interval` per card |
+| Period of the daily view | `graph_span` of the first card |
+
+The `custom:apexcharts-card` must be registered as a dashboard resource `/local/apexcharts-card.js?v=2.2.3` (type **JavaScript module**) under **Settings → Dashboards → Resources**. The entry under `lovelace.resources` in `configuration.yaml` is not sufficient in storage mode; if the resource is missing, the card shows "Configuration error". A card-level `chart_type` overrides the individual series `type` settings and should not be set.
 
 ## Discharge hold for price peaks
 
