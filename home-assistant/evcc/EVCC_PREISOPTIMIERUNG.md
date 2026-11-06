@@ -82,6 +82,10 @@ Der Batterie-Scheduler startet zusätzlich eine Nachladung, sobald der Ladestand
 - Die Nachladung endet beim Erreichen des Ziels. Solange sie aktiv ist, setzt die Nachtladung-Begrenzung kein `holdcharge`.
 - Die Nachladung ist unabhängig vom Nachtziel; die Werte `refill_soc`, `refill_window_hours` und `refill_margin` stehen am Anfang des Schedulers.
 
+## Tageszeitabhängiges Hausverbrauchsprofil
+
+Da die Wärmepumpe nicht direkt gemessen wird, lernt Home Assistant die Hausleistung (ohne Wallboxen) je Uhrzeit. Eine Automation schreibt stündlich den Mittelwert der letzten Stunde (`sensor.evcc_hausleistung_1h_mittel`) mit 30 % Gewicht in `input_text.evcc_hausleistung_profil` (24 kommagetrennte Watt-Werte, Index = Stunde). Beim ersten Lauf werden unbekannte Stunden mit dem ersten Messwert gefüllt; das Profil nähert sich in einigen Tagen der Realität an. Nachladung und Entladesperre verwenden je Intervall den Profilwert der jeweiligen Uhrzeit statt des 24-h-Mittels, sodass erwartete Verbrauchsspitzen beim rechtzeitigen Nachladen und beim Aufsparen der Batterie für teure Intervalle berücksichtigt werden. Ist das Profil leer, gilt weiter das 24-h-Mittel.
+
 ## Regeln nach Ladestand
 
 Die Batterie hält dauerhaft 10 % als Notstromreserve. Tagsüber wird PV-Überschuss nur bis 75 % in die Batterie geladen; darüber werden die Wallboxen aus dem PV-Überschuss bedient. In der Kalkulation gilt daher:
@@ -120,21 +124,30 @@ flowchart TB
 ## Ablauf
 
 ```mermaid
-flowchart TD
-	A[23:55 oder manuelle Ausführung] --> B[Planner- und Solarprognose lesen]
-	B --> C[Nachtverbrauch lesen; erster Lauf nutzt 24-h-Mittel]
-	C --> D[Ziel berechnen: mindestens 10 % plus Nachtverbrauch]
-	D --> E[PV-Aufnahmeraum von 08:00 bis 22:00 bis 75 % berücksichtigen]
-	E --> F[Netz-Ladezeit mit 10,8 kW schätzen]
-	F --> G[Planwerte berechnen; PV-Überschussintervalle auslassen]
-	G --> N[Wallbox-Grenzen bei gemessenem PV-Überschuss sperren]
-	G --> H{Batterie-Ziel erreicht?}
-	H -- Nein --> I[Smart-Netzladung zulassen]
-	H -- Ja --> J[holdcharge setzen; alle 30 Sekunden erneuern]
-	I --> H
-	J --> H
-	K[08:00] --> L[Verbrauchsmittel der letzten 10 h speichern]
-	L --> M[holdcharge aufheben]
+flowchart LR
+	subgraph P["23:55 Planung"]
+		direction TB
+		A["Planner- und Solarprognose<br/>Nachtverbrauch (erster Lauf: 24-h-Mittel)"] --> B["Ziel = 10 % + Nachtverbrauch<br/>PV-Platz 08–22 Uhr bis 75 %"]
+		B --> C["Ladezeit bei 10,8 kW<br/>günstigste Intervalle ohne PV-Überschuss"]
+	end
+	subgraph R["Laufend"]
+		direction TB
+		D{"Ziel erreicht?"}
+		D -- Nein --> E(["Smart-Netzladung erlaubt"])
+		D -- Ja --> F(["holdcharge, alle 30 s erneuert"])
+		G(["Wallbox-Netzladung bei PV-Überschuss gesperrt"])
+	end
+	subgraph M["08:00"]
+		direction TB
+		H["Verbrauch der letzten 10 h speichern"] --> I["holdcharge aufheben"]
+	end
+	P --> R --> M
+	classDef plan fill:#e3f2fd,stroke:#1e88e5,color:#0d47a1
+	classDef run fill:#e8f5e9,stroke:#43a047,color:#1b5e20
+	classDef morning fill:#fff8e1,stroke:#fb8c00,color:#e65100
+	class A,B,C plan
+	class D,E,F,G run
+	class H,I morning
 ```
 
 ## Konfiguration

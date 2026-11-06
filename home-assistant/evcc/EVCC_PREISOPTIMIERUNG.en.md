@@ -82,6 +82,10 @@ The battery scheduler additionally starts a refill as soon as the state of charg
 - The refill ends when the target is reached. While it is active, the night charge guard does not set `holdcharge`.
 - The refill is independent of the overnight target; the values `refill_soc`, `refill_window_hours`, and `refill_margin` are at the top of the scheduler.
 
+## Time-of-day house load profile
+
+The heat pump power is not measured directly, so Home Assistant learns the house power (excluding wallboxes) by time of day. An automation writes the mean of the last hour (`sensor.evcc_hausleistung_1h_mittel`) with 30% weight into `input_text.evcc_hausleistung_profil` (24 comma-separated watt values, index = hour). On the first run, unknown hours are filled with the first measured value; the profile approaches reality within a few days. Refill and discharge hold use the profile value of each interval's time of day instead of the 24 h mean, so expected consumption peaks are considered when refilling in time and when saving battery energy for expensive intervals. With an empty profile, the 24 h mean still applies.
+
 ## Rules by state of charge
 
 The battery permanently keeps 10% as an emergency-power reserve. During the day, PV surplus charges the battery only up to 75%; above that, the wallboxes are served from PV surplus. The calculation therefore applies:
@@ -120,21 +124,30 @@ flowchart TB
 ## Flow
 
 ```mermaid
-flowchart TD
-    A[23:55 or manual run] --> B[Read planner and solar forecasts]
-    B --> C[Read saved night use; first run uses 24 h mean]
-    C --> D[Compute target: at least 10 percent plus night use]
-    D --> E[Account for forecast PV headroom from 08:00 to 22:00 up to 75 percent]
-    E --> F[Estimate grid charging time at 10.8 kW]
-    F --> G[Calculate plan values; exclude PV-surplus intervals]
-    G --> N[Block wallbox grid charging during measured PV surplus]
-    G --> H{Battery SOC reached target?}
-    H -- No --> I[Allow Smart grid charging]
-    H -- Yes --> J[Set holdcharge; renew every 30 seconds]
-    I --> H
-    J --> H
-    K[08:00] --> L[Store previous 10 h average consumption]
-    L --> M[Clear holdcharge]
+flowchart LR
+    subgraph P["23:55 planning"]
+        direction TB
+        A["Planner and solar forecasts<br/>night use (first run: 24 h mean)"] --> B["Target = 10% + night use<br/>PV headroom 08-22 up to 75%"]
+        B --> C["Charge time at 10.8 kW<br/>cheapest intervals without PV surplus"]
+    end
+    subgraph R["Continuous"]
+        direction TB
+        D{"Target reached?"}
+        D -- No --> E(["Smart grid charging allowed"])
+        D -- Yes --> F(["holdcharge, renewed every 30 s"])
+        G(["Wallbox grid charging blocked during PV surplus"])
+    end
+    subgraph M["08:00"]
+        direction TB
+        H["Store previous 10 h consumption"] --> I["Clear holdcharge"]
+    end
+    P --> R --> M
+    classDef plan fill:#e3f2fd,stroke:#1e88e5,color:#0d47a1
+    classDef run fill:#e8f5e9,stroke:#43a047,color:#1b5e20
+    classDef morning fill:#fff8e1,stroke:#fb8c00,color:#e65100
+    class A,B,C plan
+    class D,E,F,G run
+    class H,I morning
 ```
 
 ## Configuration
