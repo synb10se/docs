@@ -25,7 +25,7 @@ Die Integration erstellt nur Sensoren für Ressourcen, die die Anlage tatsächli
 | Zweck | Sensorname in der Integration | Verwendung |
 | --- | --- | --- |
 | Momentanleistung | Leistungssumme Kompressor und Heizstab | `power` in evcc, W |
-| Stromverbrauch gesamt | Stromverbrauch gesamt | `energy` in evcc, kWh, Zählerstand |
+| Stromverbrauch gesamt | Stromverbrauch gesamt | Nur verwenden, wenn die API einen gültigen kWh-Zählerstand liefert |
 | Heizungsanteil | Stromverbrauch Heizen | Optionaler HA-Sensor; nicht zusätzlich zum Gesamtverbrauch in evcc einbinden |
 | Warmwasseranteil | Stromverbrauch Warmwasser | Optionaler HA-Sensor; nicht zusätzlich zum Gesamtverbrauch in evcc einbinden |
 
@@ -44,8 +44,8 @@ meters:
   - name: buderus-heizung
     type: homeassistant
     uri: http://homeassistant:8123
-    power: sensor.buderus_mx400_leistungssumme_kompressor_und_heizstab
-    energy: sensor.buderus_mx400_stromverbrauch_gesamt
+    power: sensor.warmepumpe_wmp_lan_leistungssumme_kompressor_und_heizstab
+    energy: sensor.evcc_heat_pump_energy_integrated
 
 site:
   meters:
@@ -55,8 +55,8 @@ site:
 
 Wenn `meters:` oder `site:` in deiner `evcc.yaml` schon vorhanden sind, die Einträge in diese vorhandenen Abschnitte einfügen, nicht die Abschnitte ein zweites Mal anlegen. In der evcc-Weboberfläche den Messpunkt als **Verbraucher** mit dem Anzeigenamen **Buderus Heizung** führen. Dadurch erscheinen die Werte in der Verbraucher-/Energieansicht; die Wärmepumpe wird damit nicht zu einem steuerbaren evcc-Heizungs-Loadpoint.
 
-Zur Plausibilitätsprüfung bei laufendem Betrieb die Leistung in Home Assistant und evcc vergleichen. Bei abgeschalteter Wärmepumpe sollte die Leistung nahe 0 W liegen; der Gesamtstromverbrauch muss als monoton steigender kWh-Zähler erkannt werden. Die MX400-API kann Werte abhängig von Anlage oder Firmware auslassen.
+Der Energiezähler wird in Home Assistant aus Kompressor- und Heizstableistung geschätzt, da die MX400-Stromverbrauchssensoren derzeit keine Werte liefern. Er beginnt erst nach Aktivierung und enthält keine rückwirkenden Werte; Abfrageintervalle, Ausfälle und nicht erfasste Nebenverbraucher können Abweichungen verursachen. Zur Plausibilitätsprüfung bei laufendem Betrieb die Leistung in Home Assistant und evcc vergleichen. Bei abgeschalteter Wärmepumpe sollte die Leistung nahe 0 W liegen; der geschätzte Gesamtstromverbrauch muss als monoton steigender kWh-Zähler erkannt werden.
 
 ## Alternative: getrennte Energieauswertung
 
-Für eine getrennte Auswertung von Heizung und Warmwasser können in Home Assistant die Sensoren `Stromverbrauch Heizen` und `Stromverbrauch Warmwasser` verwendet werden. Diese beiden Energiesensoren nicht zusätzlich zum Sensor `Stromverbrauch gesamt` als Verbraucher in evcc hinzufügen, da die Summen sonst doppelt gezählt werden. Die Integration stellt derzeit keinen getrennten Momentanleistungswert für Heizung und Warmwasser bereit.
+Eine getrennte Auswertung von Heizung und Warmwasser ist nur möglich, wenn die entsprechenden MX400-Energiesensoren gültige Werte liefern; das ist derzeit nicht der Fall. Diese beiden Energiesensoren nicht zusätzlich zum Gesamtverbrauch als Verbraucher in evcc hinzufügen, da die Summen sonst doppelt gezählt werden. Die Integration stellt derzeit keinen getrennten Momentanleistungswert für Heizung und Warmwasser bereit.
