@@ -88,6 +88,14 @@ The battery scheduler additionally starts a refill as soon as the state of charg
 
 Home Assistant learns house power including the heat pump but excluding wallboxes by time of day. An automation writes the mean of the last hour (`sensor.evcc_hausleistung_1h_mittel`) with 30% weight into `input_text.evcc_hausleistung_profil` (24 comma-separated watt values, index = hour). On the first run, unknown hours are filled with the first measured value. Refill, discharge hold and daily price planning's PV-surplus check use the hourly profile instead of the 24 h mean; adding heat-pump power again would double count it. With an empty profile, the 24 h mean applies. After correcting house power, the existing profile needs a few days to adapt; individual heat-pump starts cannot be predicted.
 
+## Temperature-dependent heat pump forecast
+
+Home Assistant learns hourly, per time of day, the house load without the heat pump (`input_text.evcc_haus_ohne_wp_profil`) and the heat pump power per kelvin below 18 °C outdoor temperature (`input_text.evcc_wp_kelvin_profil`). `sensor.evcc_prognose_aussentemperatur_24h` combines both with the hourly forecast of `weather.forecast_home` and exposes the expected house load per hour of day in its `profile` attribute. Hours with less than 3 K heating demand, without a forecast, or without a learned model still use the combined profile. If the attribute is missing, the combined profile applies as well.
+
+## Charge target by expensive demand
+
+The night target of the daily planning is at least the previous target, and at least 10 % plus the expected grid import (house profile minus PV forecast, divided by 0.9 discharge efficiency) in all intervals up to the first PV surplus that are more than 0.03 €/kWh above the charge price. Charge price and target depend on each other and are determined in four passes. The target is capped at the state of charge reachable in the cheap intervals before the PV surplus.
+
 ## Rules by state of charge
 
 The battery permanently keeps 10% as an emergency-power reserve. During the day, PV surplus charges the battery only up to 75%; above that, the wallboxes are served from PV surplus. The calculation therefore applies:

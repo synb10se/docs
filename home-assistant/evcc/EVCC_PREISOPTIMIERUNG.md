@@ -88,6 +88,14 @@ Der Batterie-Scheduler startet zusätzlich eine Nachladung, sobald der Ladestand
 
 Home Assistant lernt die Hausleistung einschließlich Wärmepumpe, aber ohne Wallboxen, je Uhrzeit. Eine Automation schreibt stündlich den Mittelwert der letzten Stunde (`sensor.evcc_hausleistung_1h_mittel`) mit 30 % Gewicht in `input_text.evcc_hausleistung_profil` (24 kommagetrennte Watt-Werte, Index = Stunde). Beim ersten Lauf werden unbekannte Stunden mit dem ersten Messwert gefüllt; das Profil nähert sich in einigen Tagen der Realität an. Nachladung, Entladesperre und die PV-Überschussprüfung der täglichen Preisplanung verwenden je Intervall den Profilwert statt des 24-h-Mittels. Das Profil enthält die Wärmepumpe bereits; ein zusätzlicher Aufschlag würde sie doppelt zählen. Ist das Profil leer, gilt das 24-h-Mittel. Nach der Korrektur der Hauslast benötigt das bestehende Profil einige Tage, um sich anzupassen; einzelne Wärmepumpenstarts sind nicht vorhersagbar.
 
+## Temperaturabhängige Wärmepumpenprognose
+
+Stündlich lernt Home Assistant je Uhrzeit die Hausleistung ohne Wärmepumpe (`input_text.evcc_haus_ohne_wp_profil`) und die Wärmepumpenleistung je Kelvin unter 18 °C Außentemperatur (`input_text.evcc_wp_kelvin_profil`). `sensor.evcc_prognose_aussentemperatur_24h` kombiniert beides mit der Stundenprognose von `weather.forecast_home` und liefert im Attribut `profile` die erwartete Hausleistung je Uhrzeit. Stunden mit weniger als 3 K Heizbedarf, ohne Prognose oder ohne gelerntes Modell nutzen weiter das Gesamtprofil. Fehlt das Attribut, gilt ebenfalls das Gesamtprofil.
+
+## Ladeziel nach Teuerbedarf
+
+Das Nachtziel der täglichen Planung ist mindestens das bisherige Ziel, mindestens aber 10 % plus der erwartete Netzbezug (Hausprofil abzüglich PV-Prognose, geteilt durch 0,9 Entladewirkungsgrad) in allen Intervallen bis zum ersten PV-Überschuss, die mehr als 0,03 €/kWh über dem Ladepreis liegen. Ladepreis und Ziel hängen voneinander ab und werden in vier Durchläufen bestimmt. Das Ziel wird auf den Ladestand begrenzt, der in den günstigen Intervallen bis zum PV-Überschuss erreichbar ist.
+
 ## Regeln nach Ladestand
 
 Die Batterie hält dauerhaft 10 % als Notstromreserve. Tagsüber wird PV-Überschuss nur bis 75 % in die Batterie geladen; darüber werden die Wallboxen aus dem PV-Überschuss bedient. In der Kalkulation gilt daher:
