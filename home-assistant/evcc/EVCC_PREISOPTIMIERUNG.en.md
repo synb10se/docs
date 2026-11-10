@@ -2,182 +2,100 @@
 
 [Deutsche Version](EVCC_PREISOPTIMIERUNG.md)
 
-## Requirements
+## 1. The Five Rules
 
-- The evcc planner tariff must be configured to use electricity prices.
-- The `sensor.synboxen_forecast_planner` and `sensor.synboxen_forecast_solar` entities must be enabled in Home Assistant. The evcc site solar forecast should include the forecasts configured in evcc for both roof orientations (SynSolar and SynSolar+).
-- The smart price limits for SynBox-01, SynBox-02, and the home battery must be available in evcc.
-- The `input_number.evcc_wallbox_cost_limit` helper from `configuration.yaml` must be loaded. It stores the planned wallbox limit.
-- The `select.synboxen_battery_mode` entity must be enabled so Home Assistant can renew the temporary charge lock.
+1. **PV to the home battery first:** Solar power not needed by the house is used to charge the home battery first.
+2. **Wallboxes from 75%:** Once the home battery is at least 75% charged, the wallboxes can also use surplus PV power.
+3. **Charge the home battery cheaply and use it at price peaks:** When the current electricity price is the lowest in the next six hours, the battery is charged from the grid as needed. Its energy should mainly cover expensive periods.
+4. **Charge vehicles cheaply:** For a connected vehicle, the cheapest charging intervals in the next 24 hours are selected based on its energy needs. Charging losses of about 5% are included.
+5. **Account for the heat pump:** The consumption forecast uses learned heat-pump consumption and the outdoor temperature. Together with price and PV forecasts, it helps reserve battery energy for expensive periods.
 
-## Operation
+These rules apply when price optimization is enabled and the necessary data is available. The following sections explain the requirements and limitations.
 
-The **evcc Price Optimization Enabled** switch (`input_boolean.evcc_smart_price_optimizer`) enables or pauses the automation. It is listed with the Home Assistant helpers. A newly created switch starts off; Home Assistant restores its previous state after restarts.
+## 2. Overview
 
-When enabled, the automation calculates price limits and a battery target daily at 23:55 for the following day. Running it manually recalculates the values immediately. EPEX day-ahead data is typically available by 23:55. The optimization evaluates the rolling 24-hour window:
+```mermaid
+flowchart TD
+    PV["PV generation and house load"] --> U{"PV surplus?"}
+    U -->|Yes| S{"Home battery at least 75%?"}
+    S -->|No| B["Home battery has PV priority"]
+    S -->|Yes| W["Wallboxes can use PV"]
 
-- Wallboxes: the cutoff for the four cheapest hours in total outside forecast PV-surplus intervals. An interval is excluded when forecast solar power exceeds the hourly house-load profile by more than 500 W; without a profile, the 24-hour average is used. The calculated value is stored in `input_number.evcc_wallbox_cost_limit`; a separate minute automation controls the effective evcc limits.
-- Home battery: the target state of charge accounts for the previous night's average consumption, the aggregated solar forecast from both roof orientations for the following day from 08:00 to 22:00, and the 10% emergency-power reserve for the 22:00–08:00 period. Because PV surplus serves the wallboxes above 75% state of charge during the day, the battery offers headroom for PV generation only up to 75%. This plans enough energy for overnight use while leaving room for expected PV generation. The current battery state of charge and capacity are included. Required grid-charging time is converted into the cheapest planner intervals using an assumed maximum charging power of 10.8 kW.
+    P["Electricity price forecast"] --> P6["Next 6 hours"]
+    P6 --> G{"Lowest price and no significant PV surplus?"}
+    U --> G
+    G -->|Yes| N["Enable home-battery grid charging"]
+    G -->|No| X["Defer home-battery grid charging"]
+    P --> P24["Next 24 hours"]
+    P24 --> F["Select cheapest intervals for each vehicle"]
+    D["Vehicle SoC, target, capacity and charging power"] --> F
+    F --> L["Enable wallbox grid charging in selected intervals"]
 
-The evcc planner forecast already includes surcharges and VAT (gross price) and is used unchanged. The thresholds are rounded up to evcc's 0.005 EUR/kWh step size. In Smart mode, evcc charges from the grid when the planner price does not exceed the relevant limit. The wallbox PV automation blocks grid charging when measured PV surplus exceeds 500 W by setting both Smart limits to `-0.5`. Below 200 W surplus, it restores the planned value from `input_number.evcc_wallbox_cost_limit`. This hysteresis avoids rapid toggling. Measured surplus is calculated as `sensor.synboxen_pv_power` minus `sensor.synboxen_home_power`.
+    T["Outdoor temperature and learned heat-pump consumption"] --> V["Forecast house load"]
+    V --> E["Allocate battery energy to expensive grid-import periods"]
+    P24 --> E
+    PVF["PV forecast"] --> E
+```
 
-The battery scheduler checks every minute how many planner minutes remain at or below the planned battery price. It releases the grid-charge limit only when the remaining cheap time through the next 08:00 is barely enough for the required charging time at 10.8 kW plus a 30-minute reserve. Cheap intervals after the overnight charging window no longer delay charging. Grid charging is not started while measured PV surplus remains above the hysteresis threshold. Once the battery target is reached, Home Assistant sets evcc's temporary **lock charging** mode every 30 seconds; the mode expires automatically after 60 seconds. The lock is not renewed while the battery is below its target and is cleared at 08:00.
+PV use, grid charging and discharge hold are separate decisions. The diagram shows their relationships; permission to charge does not guarantee that a device will charge.
 
-The **Energiestatistiken** sidebar dashboard visualizes consumption, generation, and grid price; see [Energy statistics dashboard](#energy-statistics-dashboard) for details. The evcc house-power value includes the heat pump but excludes wallboxes, so wallbox power is not subtracted again.
+## 3. Implementation
 
-At 08:00, Home Assistant stores the house-power average from the previous ten hours as a baseline. At 23:55 this value is scaled to the remaining hours until 08:00. Three seven-day statistics also track evcc house power (excluding wallboxes) at night while Home Connect appliances are active or idle, and the number of active appliances. Only after at least 99% time coverage is available does the automation estimate typical incremental power per appliance and project it using the remaining program times until 08:00. Until then, it uses the existing consumption estimate. On the first run, it uses the 24-hour average instead of a saved night value. The assumed charging power is a measured peak; if actual charging power is lower, evcc may need more low-price intervals. If the solar forecast is missing or has too few intervals, the battery target is still calculated without a PV-headroom allowance (at least overnight consumption plus the 10% emergency reserve). A planner outage or too few qualifying cheap intervals can prevent a new price limit from being written; the last stored value is retained. Changing the switch takes effect at the next calculation.
+### PV Priority
 
-The 23:55 run stores the planned battery grid-charge price in `input_number.evcc_battery_grid_charge_price` and the planned wallbox limit in `input_number.evcc_wallbox_cost_limit`. These helpers are plan values, not necessarily the currently active evcc limits. The wallbox limits are `number.synboxen_synbox_01_smart_cost_limit` and `number.synboxen_synbox_02_smart_cost_limit`; during PV surplus they may temporarily be `-0.5`. Check the values and states in Home Assistant under **Developer Tools → States**. Manually running the daily automation recalculates the plan values immediately.
+When optimization is enabled, Home Assistant sets the evcc `select.synboxen_priority_soc` setting to 75%, if that option is available. Below 75%, the home battery has priority for PV surplus. At 75% and above, wallboxes can receive surplus; this does not categorically prevent the battery from charging from PV.
 
-## Energy statistics dashboard
+The wallbox plan also blocks grid charging when the home battery is below 75% and measured PV power exceeds house load. It uses `sensor.synboxen_pv_power` and `sensor.synboxen_home_power`. Wallboxes must run in evcc **Smart** mode.
 
-The dashboard is defined in `lovelace_evcc_energie.yaml` and registered as a YAML dashboard in `configuration.yaml` under `lovelace.dashboards.evcc-energie`. It is a full-width panel view with two ApexCharts cards stacked vertically. YAML dashboards cannot be edited graphically in Home Assistant; edit the file and reload the page.
+### Home Battery Grid Charging
+
+Every minute, the automation compares the current planner price with the lowest price in the next six hours. When they match, grid charging can be enabled up to 100%. Grid charging is deferred when PV surplus is measured; hysteresis at 200 and 500 W reduces switching.
+
+There is no separate low-SoC emergency refill. Grid charging still depends on the price check and available data when the battery is low.
+
+### Save Battery Energy for Price Peaks
+
+Every 30 seconds, the discharge-hold automation estimates grid import for the next 24 hours from the house load and PV forecast. Battery energy above 10% is allocated to the most expensive intervals. If the current price is sufficiently lower, evcc can temporarily block discharging with `hold`; a hold set by this automation is released when grid charging is enabled or active.
+
+The 10% is a **planning reserve**. The actual backup reserve must be configured separately in the battery or evcc. The hold can influence when the battery discharges; it cannot guarantee enough energy for every later peak.
+
+### Vehicle Charging
+
+Each wallbox is planned independently every minute. For a connected, recognized vehicle, the automation calculates the energy deficit from the effective target SoC, current vehicle SoC and usable battery capacity. The deficit is divided by `0.95` to account for approximately 5% charging losses. The configured charging power determines the required charging time.
+
+The automation selects the cheapest intervals in the next 24 hours until enough charging time is available. Equal prices at the threshold can enable additional intervals. evcc stops charging at the configured vehicle target. The plan does not account for departure times and cannot guarantee charging by an earlier deadline.
+
+### Heat-Pump and House-Load Forecast
+
+Home Assistant learns hourly profiles for house load without the heat pump and heat-pump power per kelvin below 18 °C. These profiles and the hourly weather forecast produce a house-load forecast. For the current hour, measured outdoor temperature is used when a corresponding weather forecast and a valid measurement are available.
+
+Without a suitable model or temperature forecast, the calculation falls back to the learned combined house-load profile; without that profile, it uses the 24-hour mean. New profiles need time and measurements to learn. Individual heat-pump starts and forecast errors remain uncertain.
+
+### Missing Data and Price Limits
+
+Wallbox grid charging requires, among other things, a recognized vehicle, valid charging and PV measurements, a nearly complete 24-hour price forecast and enough charging time in that window. Home-battery grid charging requires valid measurements and nearly six hours of prices. When these requirements are not met, the respective automation sets its grid charging limit to the blocking value.
+
+The blocking value is `-0.5 EUR/kWh`, the lowest configurable Smart price limit. At prices equal to or below it, grid charging cannot reliably be blocked. Release limits are rounded up to evcc's `0.005 EUR/kWh` step. If a limit entity is unavailable or invalid, the automation cannot change its existing value.
+
+## 4. Setup and Checks
+
+1. Configure an evcc planner tariff with electricity prices, set both wallboxes to **Smart**, and make their price limits and `select.synboxen_priority_soc` and `select.synboxen_battery_mode` available. The PV forecast should include both roof orientations.
+2. Restart Home Assistant after changing the configuration so that the new helpers are created.
+3. Set `input_number.evcc_killerminion_capacity` and `input_number.evcc_goldensnitch_capacity` to the vehicles' usable battery capacities in kWh. The mapping applies to evcc vehicles named `KillerMinion` and `GoldenSnitch`; other vehicle names require an automation change.
+4. Set `input_number.evcc_synbox_01_charge_power` and `input_number.evcc_synbox_02_charge_power` to the available grid charging power in kW. Account for the vehicle, phases, current limits and load management; choose conservative values and update them when circumstances change.
+5. Configure the 10% backup reserve in the battery or evcc. Enable `input_boolean.evcc_smart_price_optimizer`, then check vehicle assignments, measurements, price limits and the first control actions under **Developer Tools → States**.
+
+The switch pauses optimization but does not automatically reset limits already written. `input_number.evcc_wallbox_cost_limit` and `input_boolean.evcc_battery_refill_active` no longer control the current plan.
+
+## 5. Energy Statistics Dashboard
+
+The YAML dashboard in `lovelace_evcc_energie.yaml` shows energy flows and the electricity price. It is registered via `lovelace.dashboards.evcc-energie` in `configuration.yaml` and contains two ApexCharts cards:
 
 | Card | Period | Content |
 | --- | --- | --- |
-| 14-Tage-Verbrauchsstatistik (kWh) | last 14 days, daily totals, columns | house consumption excluding heat pump and wallboxes, heat pump, wallboxes, grid import, battery discharge, PV production |
-| 24-Stunden-Energieverbrauch und Netzpreis (15 min) | last 24 hours, per 15 minutes | the same quantities as energy difference per interval; grid price (`sensor.synboxen_forecast_planner`) as an area on its own €/kWh axis |
+| 14-day consumption statistics | daily values for the last 14 days | house excluding heat pump and wallboxes, heat pump, wallboxes, grid import, battery discharge and PV production |
+| 24-hour energy consumption and grid price | last 24 hours in 15-minute intervals | the same energy flows and the planner grid price |
 
-Daily values come from long-term statistics (`statistics` with `type: change`, `period: day`). The 24-hour card calculates the difference (`group_by.func: delta`) from history. Wallbox energy comes from `sensor.evcc_wallbox_energy_total` in the daily view and from `sensor.evcc_wallbox_energy_integrated` (integrated wallbox power) in the 24-hour view; the two may differ slightly. All entities used must keep long-term statistics (`state_class` set).
+Daily values come from long-term statistics; the 24-hour card calculates differences from history. The two wallbox energy sources may differ slightly. Heat-pump energy and remaining house consumption are estimated from power measurements; delayed or missing readings can cause discrepancies. New counters are not backfilled.
 
-Heat-pump energy and the remaining house consumption are estimates obtained by integrating reported power. The remaining-house sensor subtracts heat-pump power from house power and clamps negative differences to zero. Asynchronous samples, polling intervals, outages and unmeasured auxiliary loads can cause discrepancies; the remaining-house sensor is unavailable when either input is missing. New counters and statistics start after restarting Home Assistant and are not backfilled. Existing total-house statistics remain available, but were understated during wallbox charging due to the previous double subtraction. Heat-pump daily and monthly meters use the new estimated counter. Restart Home Assistant after changing the configuration and check the sensors and charts.
-
-### Usage
-
-- Clicking a legend entry permanently hides or shows the series (`apex_config.legend.onItemClick.toggleDataSeries`).
-- Hovering over a legend entry highlights the series (`apex_config.legend.onItemHover.highlightDataSeries`).
-- Hidden series may reappear on a refresh (`update_interval`).
-
-### Customization
-
-| Setting | Location in the YAML file |
-| --- | --- |
-| Chart height (default 420 px) | `apex_config.chart.height` per card |
-| Series color | `color` per series |
-| Area/line/column rendering | `type` (`area`, `line`, `column`) per series |
-| Line width, area opacity | `stroke_width`, `opacity` per series |
-| Refresh | `update_interval` per card |
-| Period of the daily view | `graph_span` of the first card |
-
-The `custom:apexcharts-card` must be registered as a dashboard resource `/local/apexcharts-card.js?v=2.2.3` (type **JavaScript module**) under **Settings → Dashboards → Resources**. The entry under `lovelace.resources` in `configuration.yaml` is not sufficient in storage mode; if the resource is missing, the card shows "Configuration error". A card-level `chart_type` overrides the individual series `type` settings and should not be set.
-
-## Discharge hold for price peaks
-
-While the **evcc Price Optimization Enabled** switch is on, a further automation checks every 30 seconds whether home-battery discharging should be blocked. It assigns the remaining energy above the 10% emergency reserve to the most expensive intervals of the next 24 hours. Grid import per interval is the average house load (`sensor.evcc_hausleistung_24h_mittel`) minus the PV forecast. The lowest price among those intervals is the peak-price threshold.
-
-- Discharging is blocked (evcc mode `hold`) when the battery is at or below 50%, discharges at more than 100 W, and the current price is more than EUR 0.02/kWh below the threshold.
-- The block is renewed every 30 seconds because evcc resets the mode after 60 seconds.
-- It is released when the current price reaches the threshold, or the state of charge drops below 10% or rises above 50%.
-- The helper `input_boolean.evcc_battery_discharge_hold` records that the block was set by this automation. Only then is it released again.
-- If the night charge guard has set `holdcharge`, the automation does not intervene.
-
-The start limit (50%), reserve (10%), and margin (EUR 0.02/kWh) are variables at the top of the automation.
-
-## Refilling an empty home battery
-
-The battery scheduler additionally starts a refill as soon as the state of charge is 10% or less. The helper `input_boolean.evcc_battery_refill_active` stores the active state.
-
-- The target is 10% plus the expected grid import (house load minus PV forecast) of the next 24 hours in intervals more than EUR 0.03/kWh above the cheapest price of the next 6 hours (maximum 100%).
-- The PV forecast of that window (next 6 hours) is credited first, but only up to a state of charge of 75%; only the remainder is charged from the grid.
-- For this, the cheapest intervals of the window without PV surplus are selected (10.8 kW charging power). The grid-charge limit is set to the price of the most expensive selected interval so that charging happens only in cheap intervals.
-- No grid charging takes place while PV surplus is measured.
-- The refill ends when the target is reached. While it is active, the night charge guard does not set `holdcharge`.
-- The refill is independent of the overnight target; the values `refill_soc`, `refill_window_hours`, and `refill_margin` are at the top of the scheduler.
-
-## Time-of-day house load profile
-
-Home Assistant learns house power including the heat pump but excluding wallboxes by time of day. An automation writes the mean of the last hour (`sensor.evcc_hausleistung_1h_mittel`) with 30% weight into `input_text.evcc_hausleistung_profil` (24 comma-separated watt values, index = hour). On the first run, unknown hours are filled with the first measured value. Refill, discharge hold and daily price planning's PV-surplus check use the hourly profile instead of the 24 h mean; adding heat-pump power again would double count it. With an empty profile, the 24 h mean applies. After correcting house power, the existing profile needs a few days to adapt; individual heat-pump starts cannot be predicted.
-
-## Temperature-dependent heat pump forecast
-
-Home Assistant learns hourly, per time of day, the house load without the heat pump (`input_text.evcc_haus_ohne_wp_profil`) and the heat pump power per kelvin below 18 °C outdoor temperature (`input_text.evcc_wp_kelvin_profil`). `sensor.evcc_prognose_aussentemperatur_24h` combines both with the hourly forecast of `weather.forecast_home` and exposes the expected house load per hour of day in its `profile` attribute. Hours with less than 3 K heating demand, without a forecast, or without a learned model still use the combined profile. If the attribute is missing, the combined profile applies as well.
-
-## Rolling battery charging
-
-The scheduler runs every minute and always charges the home battery to 100 %. From the prices of the next 24 hours it selects the cheapest intervals without PV surplus whose charging time (4 kW charging power assumed) is enough to reach 100 %, and releases the evcc grid charge limit only in those intervals. At 11 % state of charge or below, one hour of charging is additionally planned in the cheapest intervals of the next 2 hours if neither a planned charge nor PV surplus lies there; it runs until about 11 % plus 4 kWh. The discharge lock applies at every state of charge above 10 % and lets the battery discharge only in the most expensive intervals of the next 24 hours. The daily planning at 23:55 now only sets the wallbox price limit.
-
-## Rules by state of charge
-
-The battery permanently keeps 10% as an emergency-power reserve. During the day, PV surplus charges the battery only up to 75%; above that, the wallboxes are served from PV surplus. The calculation therefore applies:
-
-- Minimum overnight target: 10% emergency reserve plus overnight consumption.
-- PV headroom of the battery: only up to 75% instead of 100%. The overnight target is `75% - PV yield (in %) + overnight consumption`, but at least the minimum target.
-- Discharge hold: usable remaining energy is everything above 10%.
-- Refill: PV is credited only up to 75%; above that, surplus no longer charges the battery.
-
-```mermaid
-flowchart TB
-    subgraph S100["75% to 100%: wallboxes from PV"]
-        direction TB
-        A1["PV surplus charges the wallboxes, not the battery"]
-        A2["Battery grid charging only if the overnight target requires it"]
-    end
-    subgraph S75["50% to 75%: PV fills the battery"]
-        direction TB
-        B1["PV surplus charges the battery"]
-        B2["Discharge hold for price peaks possible (up to 50%)"]
-    end
-    subgraph S10["10% to 50%: price optimization"]
-        direction TB
-        C1["Discharging is saved for the most expensive intervals"]
-        C2["Grid charging only in cheap intervals up to the overnight target"]
-    end
-    subgraph S0["10% or less: emergency reserve"]
-        direction TB
-        D1["No discharging below 10%"]
-        D2["Refill with PV or the cheapest grid price of the next 6 h"]
-        D3["Target: 10% plus consumption in expensive intervals of the next 24 h"]
-    end
-    S100 --- S75 --- S10 --- S0
-```
-
-## Flow
-
-```mermaid
-flowchart LR
-    subgraph P["23:55 planning"]
-        direction TB
-        A["Planner and solar forecasts<br/>night use (first run: 24 h mean)"] --> B["Target = 10% + night use<br/>PV headroom 08-22 up to 75%"]
-        B --> C["Charge time at 10.8 kW<br/>cheapest intervals without PV surplus"]
-    end
-    subgraph R["Continuous"]
-        direction TB
-        D{"Target reached?"}
-        D -- No --> E(["Smart grid charging allowed"])
-        D -- Yes --> F(["holdcharge, renewed every 30 s"])
-        G(["Wallbox grid charging blocked during PV surplus"])
-    end
-    subgraph M["08:00"]
-        direction TB
-        H["Store previous 10 h consumption"] --> I["Clear holdcharge"]
-    end
-    P --> R --> M
-    classDef plan fill:#e3f2fd,stroke:#1e88e5,color:#0d47a1
-    classDef run fill:#e8f5e9,stroke:#43a047,color:#1b5e20
-    classDef morning fill:#fff8e1,stroke:#fb8c00,color:#e65100
-    class A,B,C plan
-    class D,E,F,G run
-    class H,I morning
-```
-
-## Configuration
-
-The helpers are defined in `configuration.yaml`; the automations are in `automations.yaml`. Entity IDs used by the configuration:
-
-- `sensor.synboxen_forecast_planner`
-- `number.synboxen_synbox_01_smart_cost_limit`
-- `number.synboxen_synbox_02_smart_cost_limit`
-- `number.synboxen_battery_grid_charge_limit`
-- `sensor.synboxen_forecast_solar`
-- `sensor.synboxen_battery_soc`
-- `sensor.synboxen_battery_capacity`
-- `select.synboxen_battery_mode`
-- `input_number.evcc_night_consumption_kwh`
-- `input_number.evcc_wallbox_cost_limit`
-- `input_number.evcc_battery_grid_charge_price`
-- `input_number.evcc_battery_target_soc`
-- `sensor.synboxen_pv_power`
-- `sensor.synboxen_home_power`
-- `sensor.synboxen_battery_power`
-- `sensor.evcc_hausleistung_24h_mittel`
-- `input_boolean.evcc_battery_discharge_hold`
+Click a legend entry to hide or show a series; it may reappear on refresh. Chart height, colors, rendering and period can be adjusted in the YAML file. `custom:apexcharts-card` must be registered as the `/local/apexcharts-card.js?v=2.2.3` resource of type **JavaScript module** under **Settings → Dashboards → Resources**. YAML dashboard changes appear after reloading the page.

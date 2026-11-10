@@ -2,182 +2,100 @@
 
 [English version](EVCC_PREISOPTIMIERUNG.en.md)
 
-## Voraussetzungen
+## 1. Die fünf Regeln
 
-- Der evcc Planner-Tarif muss auf Strompreise eingestellt sein.
-- Die Entities `sensor.synboxen_forecast_planner` und `sensor.synboxen_forecast_solar` sind in Home Assistant aktiviert. Der Solar-Standortforecast von evcc sollte die in evcc eingerichteten Prognosen beider Dachflächen (SynSolar und SynSolar+) enthalten.
-- Die Smart-Preisgrenzen von SynBox-01, SynBox-02 und der Hausbatterie müssen in evcc verfügbar sein.
-- Der Helper `input_number.evcc_wallbox_cost_limit` muss aus `configuration.yaml` geladen sein. Er speichert den geplanten Wallbox-Grenzwert.
-- Die Entität `select.synboxen_battery_mode` muss aktiviert sein, damit Home Assistant die zeitlich begrenzte Ladesperre erneuern kann.
+1. **PV zuerst in die Hausbatterie:** Sonnenstrom, den das Haus nicht benötigt, lädt vorrangig die Hausbatterie.
+2. **Wallboxen ab 75 %:** Sobald die Hausbatterie mindestens zu 75 % geladen ist, können auch die Wallboxen PV-Überschuss nutzen.
+3. **Hausbatterie günstig laden und bei Preisspitzen nutzen:** Ist der Strom jetzt am günstigsten innerhalb der nächsten sechs Stunden, wird die Batterie bei Bedarf aus dem Netz geladen. Ihre Energie soll vor allem teure Zeiten abdecken.
+4. **Fahrzeuge günstig laden:** Für ein angeschlossenes Fahrzeug werden die günstigsten Ladezeiten der nächsten 24 Stunden anhand seines Ladebedarfs ermittelt. Etwa 5 % Ladeverluste werden berücksichtigt.
+5. **Wärmepumpe berücksichtigen:** Die Verbrauchsprognose nutzt die gelernten Wärmepumpenverbräuche und die Außentemperatur. Zusammen mit der Preis- und PV-Prognose hilft sie, Batterieenergie für teure Zeiten einzuplanen.
 
-## Bedienung
+Diese Regeln gelten bei eingeschalteter Preisoptimierung und verfügbaren Daten. Die konkreten Voraussetzungen und Grenzen stehen in den folgenden Abschnitten.
 
-Der Schalter **evcc Preisoptimierung aktiv** (`input_boolean.evcc_smart_price_optimizer`) aktiviert oder pausiert die Automation. Er befindet sich unter den Helfern. Ein neu angelegter Schalter startet aus; Home Assistant stellt danach seinen letzten Zustand bei Neustarts wieder her.
+## 2. Grafische Übersicht
 
-Ist der Schalter eingeschaltet, berechnet die Automation täglich um 23:55 Uhr Preisgrenzen und ein Nachtziel für den Folgetag. Eine manuelle Ausführung berechnet die Werte sofort neu. Die EPEX-Day-ahead-Daten liegen um 23:55 Uhr typischerweise bereits vor. Die Preisoptimierung wertet das rollierende Zeitfenster der nächsten 24 Stunden aus:
+```mermaid
+flowchart TD
+    PV["PV-Erzeugung und Hausverbrauch"] --> U{"PV-Überschuss?"}
+    U -->|Ja| S{"Hausbatterie mindestens 75 %?"}
+    S -->|Nein| B["Hausbatterie hat PV-Vorrang"]
+    S -->|Ja| W["Wallboxen können PV nutzen"]
 
-- Wallboxen: Cutoff der günstigsten insgesamt vier Stunden außerhalb prognostizierter PV-Überschussintervalle. Ein Intervall wird ausgelassen, wenn die Solarprognose die Hausleistung des Stundenprofils um mehr als 500 W übersteigt; ohne Profil gilt das 24-Stunden-Mittel. Der berechnete Wert wird in `input_number.evcc_wallbox_cost_limit` gespeichert; die wirksamen evcc-Grenzen steuert eine separate Minuten-Automation.
-- Hausbatterie: Der Ziel-Ladezustand berücksichtigt den durchschnittlichen Verbrauch der letzten Nacht, die aggregierte Solarprognose beider Dachflächen für den Folgetag von 08:00 bis 22:00 und die Notstromreserve von 10 % für den Zeitraum 22:00 bis 08:00. Da tagsüber ab 75 % Ladestand der PV-Überschuss die Wallboxen bedient, bietet die Batterie dem PV-Ertrag nur Platz bis 75 %. So wird genug nächtliche Energie eingeplant und zugleich Platz für den erwarteten PV-Ertrag gelassen. Der aktuelle Ladezustand und die Kapazität der Batterie werden berücksichtigt. Der Ladebedarf wird mit einer angenommenen Netz-Ladeleistung von 10,8 kW in die günstigsten Planner-Intervalle umgerechnet.
+    P["Strompreisprognose"] --> P6["Nächste 6 Stunden"]
+    P6 --> G{"Preis am günstigsten und kein relevanter PV-Überschuss?"}
+    U --> G
+    G -->|Ja| N["Hausbatterie-Netzladung freigeben"]
+    G -->|Nein| X["Hausbatterie-Netzladung zurückstellen"]
+    P --> P24["Nächste 24 Stunden"]
+    P24 --> F["Pro Fahrzeug günstigste Ladeintervalle auswählen"]
+    D["Fahrzeug-SoC, Ladeziel, Kapazität und Ladeleistung"] --> F
+    F --> L["Wallbox-Netzladung in ausgewählten Intervallen"]
 
-Der evcc-Planner-Forecast enthält bereits Aufschläge und MwSt. (Bruttopreis) und wird daher unverändert verwendet. Die Grenzwerte werden anschließend auf evccs Schrittweite von 0,005 €/kWh aufgerundet. evcc lädt im Modus „Smart“ aus dem Netz, wenn der Planner-Preis die jeweilige Grenze nicht überschreitet. Die Wallbox-PV-Automation sperrt die Netzladung bei mehr als 500 W gemessenem PV-Überschuss, indem sie beide Smart-Grenzen auf `-0,5` setzt. Unter 200 W Überschuss stellt sie den geplanten Wert aus `input_number.evcc_wallbox_cost_limit` wieder her. Die Hysterese verhindert häufiges Umschalten. Die aktuelle Überschussleistung wird als `sensor.synboxen_pv_power` minus `sensor.synboxen_home_power` berechnet.
+    T["Außentemperatur und gelernter Wärmepumpenverbrauch"] --> V["Hausverbrauch prognostizieren"]
+    V --> E["Batterieenergie für teure Bezugszeiten einplanen"]
+    P24 --> E
+    PVF["PV-Prognose"] --> E
+```
 
-Der Batterie-Scheduler prüft jede Minute, ob noch günstige Planner-Intervalle bis zum geplanten Batteriepreis verbleiben. Er gibt das Netzladelimit erst frei, wenn die verbleibende günstige Zeit bis zum nächsten 08:00 nur noch knapp für die benötigte Ladezeit bei 10,8 kW plus 30 Minuten Reserve reicht. So verzögern günstige Intervalle nach dem Nachtladefenster die Ladung nicht. Netzladung wird nicht gestartet, solange der gemessene PV-Überschuss über der Hysterese liegt. Sobald das Batterie-Ziel erreicht ist, setzt Home Assistant alle 30 Sekunden den evcc-Modus „Laden sperren“, der automatisch nach 60 Sekunden ausläuft. Unterhalb des Ziels wird die Sperre nicht erneuert; um 08:00 wird eine bestehende Sperre aufgehoben.
+PV-Nutzung, Netzladung und Entladesperre sind getrennte Entscheidungen. Die Grafik zeigt ihre Zusammenhänge; eine Netzfreigabe garantiert nicht, dass die Geräte tatsächlich laden.
 
-Das Sidebar-Dashboard **Energiestatistiken** visualisiert Verbrauch, Erzeugung und Netzpreis; Details stehen im Abschnitt [Dashboard Energiestatistiken](#dashboard-energiestatistiken). Der evcc-Hausleistungswert enthält die Wärmepumpe, aber nicht die Wallboxen; deren Leistung wird daher nicht nochmals abgezogen.
+## 3. Umsetzung
 
-Um 08:00 speichert Home Assistant den aus der Hausleistung berechneten Verbrauch der vergangenen zehn Stunden als Basis. Um 23:55 wird dieser Wert auf die verbleibenden Stunden bis 08:00 skaliert. Zusätzlich erfassen drei 7-Tage-Statistiken nachts die evcc-Hausleistung (ohne Wallboxen) bei laufenden bzw. inaktiven Home-Connect-Geräten und die Zahl aktiver Geräte. Erst bei mindestens 99 % Zeitabdeckung wird daraus die typische Zusatzleistung pro Gerät geschätzt und mit den Restlaufzeiten aktiver Programme bis 08:00 hochgerechnet. Bis dahin bleibt die bisherige Verbrauchsschätzung aktiv. Beim ersten Lauf wird statt des gespeicherten Nachtwerts der 24-Stunden-Mittelwert verwendet. Die angenommene Ladeleistung ist ein gemessener Spitzenwert; ist die tatsächliche Ladeleistung niedriger, kann evcc mehr günstige Intervalle benötigen. Fehlt die Solarprognose oder enthält sie zu wenige Intervalle, berechnet die Batterieoptimierung das Ziel ohne PV-Aufnahmepuffer weiter (mindestens Nachtverbrauch plus 10 % Notstromreserve). Planner-Ausfall oder unzureichende günstige Intervalle können dagegen verhindern, dass ein neuer Preisgrenzwert geschrieben wird; in diesem Fall bleibt der zuletzt gespeicherte Wert erhalten. Das Ändern des Schalters wirkt bei der nächsten Berechnung.
+### PV-Vorrang
 
-Der Lauf um 23:55 legt den geplanten Batterie-Netzladepreis in `input_number.evcc_battery_grid_charge_price` und den geplanten Wallbox-Grenzwert in `input_number.evcc_wallbox_cost_limit` ab. Die Helper sind Planwerte, nicht zwingend die gerade aktiven evcc-Grenzen. Die Wallbox-Grenzen stehen in `number.synboxen_synbox_01_smart_cost_limit` und `number.synboxen_synbox_02_smart_cost_limit`; bei PV-Überschuss können sie vorübergehend auf `-0,5` stehen. Den Zustand und die Helper-Werte können Sie in Home Assistant unter **Entwicklerwerkzeuge → Zustände** prüfen. Eine manuelle Ausführung der täglichen Automation berechnet die Planwerte sofort neu.
+Bei aktivierter Optimierung setzt Home Assistant die evcc-Einstellung `select.synboxen_priority_soc` auf 75 %, sofern diese Option verfügbar ist. Unterhalb von 75 % hat die Hausbatterie beim PV-Überschuss Vorrang. Ab 75 % können Wallboxen Überschuss erhalten; die Batterie wird dadurch nicht grundsätzlich vom PV-Laden ausgeschlossen.
 
-## Dashboard Energiestatistiken
+Zusätzlich sperrt die Wallboxplanung die Netzfreigabe, wenn die Hausbatterie unter 75 % liegt und PV-Leistung über dem Hausverbrauch gemessen wird. Hierfür verwendet sie `sensor.synboxen_pv_power` und `sensor.synboxen_home_power`. Die Wallboxen müssen in evcc im Modus **Smart** betrieben werden.
 
-Das Dashboard ist in `lovelace_evcc_energie.yaml` definiert und wird in `configuration.yaml` unter `lovelace.dashboards.evcc-energie` als YAML-Dashboard eingebunden. Es besteht aus einer Panel-Ansicht (volle Breite) mit zwei untereinander angeordneten ApexCharts-Karten. Eine grafische Bearbeitung in Home Assistant ist für YAML-Dashboards nicht möglich; Änderungen erfolgen in der Datei und wirken nach dem Neuladen der Seite.
+### Hausbatterie aus dem Netz laden
+
+Jede Minute vergleicht die Automation den aktuellen Planner-Preis mit dem niedrigsten Preis der nächsten sechs Stunden. Entspricht er diesem Minimum, kann die Batterie bis 100 % aus dem Netz laden. Bei gemessenem PV-Überschuss wird die Netzladung zurückgestellt; eine Hysterese mit 200 und 500 W reduziert häufiges Umschalten.
+
+Eine Sondernachladung bei niedrigem Ladestand ist nicht aktiv. Die Netzladung bleibt auch bei niedrigem Ladestand von der Preisprüfung und den verfügbaren Daten abhängig.
+
+### Batterieenergie für Preisspitzen sparen
+
+Alle 30 Sekunden berechnet die Entladesperre den erwarteten Netzbezug der nächsten 24 Stunden aus Hauslast und PV-Prognose. Der Batterievorrat oberhalb von 10 % wird rechnerisch den teuersten Intervallen zugeordnet. Liegt der aktuelle Preis ausreichend darunter, kann evcc die Batterieentladung vorübergehend mit `hold` sperren; bei freigegebener oder aktiver Netzladung wird die von dieser Automation gesetzte Sperre aufgehoben.
+
+Die 10 % sind eine **Planungsreserve**. Die tatsächliche Notstromreserve muss separat in der Batterie oder in evcc eingerichtet sein. Die Sperre kann nur beeinflussen, wann die Batterie entlädt; sie garantiert nicht, dass genug Energie für alle späteren Spitzen vorhanden ist.
+
+### Fahrzeugladung planen
+
+Jede Wallbox wird minütlich und unabhängig geplant. Für ein angeschlossenes, erkanntes Fahrzeug berechnet die Automation den Energiebedarf aus der Differenz zwischen effektivem Ladeziel und Fahrzeug-Ladestand sowie der nutzbaren Batteriekapazität. Der Bedarf wird durch `0,95` geteilt, um rund 5 % Ladeverluste einzurechnen. Aus der eingestellten Ladeleistung ergibt sich die benötigte Ladezeit.
+
+Die Automation wählt die preisgünstigsten Intervalle der nächsten 24 Stunden, bis diese Ladezeit erreicht ist. Bei gleichen Preisen am Grenzwert können zusätzliche Intervalle freigegeben werden. evcc beendet die Ladung am eingestellten Fahrzeugziel. Die Planung berücksichtigt keine Abfahrtszeit und gewährleistet daher keine Ladung bis zu einem früheren Termin.
+
+### Wärmepumpen- und Hauslastprognose
+
+Home Assistant lernt stündliche Profile für die Hausleistung ohne Wärmepumpe und die Wärmepumpenleistung je Kelvin unter 18 °C. Daraus und aus der stündlichen Wettervorhersage entsteht eine Hauslastprognose. Für die aktuelle Stunde wird die gemessene Außentemperatur verwendet, sofern ein passender Wetterprognosewert und eine gültige Messung vorliegen.
+
+Fehlen ein geeignetes Modell oder eine Temperaturprognose, fällt die Berechnung auf das erlernte Gesamtlastprofil zurück; fehlt auch dieses, wird der 24-Stunden-Mittelwert verwendet. Neue Profile müssen zunächst durch Messungen lernen. Einzelne Wärmepumpenstarts und Prognosefehler bleiben unsicher.
+
+### Fehlende Daten und Preisgrenzen
+
+Für die Wallbox-Netzfreigabe sind unter anderem ein erkanntes Fahrzeug, gültige Lade- und PV-Daten, eine weitgehend vollständige 24-Stunden-Preisprognose sowie genügend Ladezeit im Fenster erforderlich. Für die Batterie-Netzfreigabe werden gültige Messwerte und nahezu sechs Stunden Preisprognose benötigt. Fehlen diese Voraussetzungen, setzt die jeweilige Automation den Netzladegrenzwert auf den Sperrwert.
+
+Der Sperrwert beträgt `-0,5 €/kWh`, die kleinste einstellbare Smart-Preisgrenze. Bei Strompreisen auf oder unter diesem Wert kann er die Netzladung nicht zuverlässig sperren. Freigabegrenzen werden auf die evcc-Schrittweite von `0,005 €/kWh` aufgerundet. Bei nicht erreichbarer oder ungültiger Grenzwert-Entität kann die Automation den bestehenden Wert nicht ändern.
+
+## 4. Einrichtung und Kontrolle
+
+1. In evcc den Planner-Tarif mit Strompreisen konfigurieren, beide Wallboxen auf **Smart** stellen und die Preisgrenzen sowie `select.synboxen_priority_soc` und `select.synboxen_battery_mode` verfügbar machen. Die PV-Prognose sollte beide Dachflächen enthalten.
+2. Home Assistant nach den Konfigurationsänderungen neu starten, damit die neuen Helfer angelegt werden.
+3. `input_number.evcc_killerminion_capacity` und `input_number.evcc_goldensnitch_capacity` auf die nutzbaren Fahrzeugbatteriekapazitäten in kWh setzen. Die Zuordnung gilt für die in evcc erkannten Fahrzeuge `KillerMinion` und `GoldenSnitch`; andere Fahrzeugnamen erfordern eine Anpassung der Automation.
+4. `input_number.evcc_synbox_01_charge_power` und `input_number.evcc_synbox_02_charge_power` auf die verfügbare Netzladeleistung in kW setzen. Fahrzeug, Phasen, Strombegrenzung und Lastmanagement berücksichtigen; Werte konservativ wählen und bei Änderungen anpassen.
+5. Die 10-%-Notstromreserve in der Batterie oder in evcc konfigurieren. Anschließend `input_boolean.evcc_smart_price_optimizer` einschalten und Fahrzeugzuordnung, Messwerte, Preisgrenzen und erste Schaltungen unter **Entwicklerwerkzeuge → Zustände** prüfen.
+
+Der Schalter pausiert die Optimierung, setzt aber bereits geschriebene Grenzwerte nicht automatisch zurück. `input_number.evcc_wallbox_cost_limit` und `input_boolean.evcc_battery_refill_active` steuern die aktuelle Planung nicht mehr.
+
+## 5. Dashboard Energiestatistiken
+
+Das YAML-Dashboard in `lovelace_evcc_energie.yaml` zeigt die Energieflüsse und den Netzpreis. Es wird über `lovelace.dashboards.evcc-energie` in `configuration.yaml` eingebunden und besteht aus zwei ApexCharts-Karten:
 
 | Karte | Zeitraum | Inhalt |
 | --- | --- | --- |
-| 14-Tage-Verbrauchsstatistik (kWh) | letzte 14 Tage, Tageswerte, Säulen | Hausverbrauch ohne Wärmepumpe und Wallboxen, Wärmepumpe, Wallboxen, Netzbezug, Batterieentladung, PV-Produktion |
-| 24-Stunden-Energieverbrauch und Netzpreis (15 min) | letzte 24 Stunden, je 15 Minuten | dieselben Größen als Energiedifferenz je Intervall; der Netzpreis (`sensor.synboxen_forecast_planner`) als Fläche auf einer eigenen €/kWh-Achse |
+| 14-Tage-Verbrauchsstatistik | Tageswerte der letzten 14 Tage | Haus ohne Wärmepumpe und Wallboxen, Wärmepumpe, Wallboxen, Netzbezug, Batterieentladung und PV-Produktion |
+| 24-Stunden-Energieverbrauch und Netzpreis | letzte 24 Stunden in 15-Minuten-Intervallen | dieselben Energieflüsse und der Planner-Netzpreis |
 
-Die Tageswerte stammen aus den Langzeitstatistiken (`statistics` mit `type: change`, `period: day`). Die 24-Stunden-Karte berechnet die Differenz (`group_by.func: delta`) aus dem Verlauf. Die Wallbox-Energie stammt in der Tagesansicht aus `sensor.evcc_wallbox_energy_total`, in der 24-Stunden-Ansicht aus `sensor.evcc_wallbox_energy_integrated` (Integration der Wallbox-Leistung); beide Werte können leicht abweichen. Voraussetzung ist, dass alle verwendeten Entitäten Langzeitstatistiken führen (`state_class` gesetzt).
+Tageswerte stammen aus Langzeitstatistiken; die 24-Stunden-Karte bildet Differenzen aus dem Verlauf. Die beiden Wallbox-Energiequellen können leicht voneinander abweichen. Wärmepumpenenergie und übriger Hausverbrauch sind aus Leistungsmessungen geschätzt; Messverzögerungen oder Ausfälle können Abweichungen verursachen. Neue Zähler werden nicht rückwirkend befüllt.
 
-Wärmepumpenenergie und übriger Hausverbrauch sind Schätzungen aus der Integration der gemeldeten Leistung. Der Resthaus-Sensor zieht die Wärmepumpenleistung von der Hausleistung ab und begrenzt negative Differenzen auf null. Zeitversetzte Messungen, Abfrageintervalle, Ausfälle und nicht erfasste Nebenverbraucher können Abweichungen verursachen; bei fehlenden Eingangswerten ist der Resthaus-Sensor nicht verfügbar. Die neuen Zähler und Statistiken beginnen erst nach dem Neustart, sie werden nicht rückwirkend befüllt. Die bisherigen Gesamthaus-Statistiken bleiben erhalten, waren aber während Wallboxladung durch den früheren doppelten Abzug zu niedrig. Tages- und Monatszähler der Wärmepumpe verwenden den neuen Schätzzähler. Home Assistant nach der Konfigurationsänderung neu starten und danach die Sensoren und Diagramme prüfen.
-
-### Bedienung
-
-- Ein Klick auf einen Legendeneintrag blendet die Serie dauerhaft aus bzw. wieder ein (`apex_config.legend.onItemClick.toggleDataSeries`).
-- Das Überfahren eines Legendeneintrags hebt die Serie hervor (`apex_config.legend.onItemHover.highlightDataSeries`).
-- Ausgeblendete Serien werden bei einer Aktualisierung (`update_interval`) möglicherweise wieder eingeblendet.
-
-### Anpassung
-
-| Einstellung | Ort in der YAML-Datei |
-| --- | --- |
-| Diagrammhöhe (Standard 420 px) | `apex_config.chart.height` je Karte |
-| Serienfarbe | `color` je Serie |
-| Flächen-/Liniendarstellung | `type` (`area`, `line`, `column`) je Serie |
-| Linienstärke, Flächendeckkraft | `stroke_width`, `opacity` je Serie |
-| Aktualisierung | `update_interval` je Karte |
-| Zeitraum der Tagesansicht | `graph_span` der ersten Karte |
-
-Die Karte `custom:apexcharts-card` muss als Dashboard-Ressource `/local/apexcharts-card.js?v=2.2.3` (Typ **JavaScript-Modul**) unter **Einstellungen → Dashboards → Ressourcen** registriert sein. Der Eintrag unter `lovelace.resources` in `configuration.yaml` genügt im Storage-Modus nicht; fehlt die Ressource, zeigt die Karte „Konfigurationsfehler“. Ein globales `chart_type` auf Kartenebene überschreibt die `type`-Angaben der einzelnen Serien und sollte nicht gesetzt werden.
-
-## Entladesperre für Preisspitzen
-
-Solange der Schalter **evcc Preisoptimierung aktiv** eingeschaltet ist, prüft eine weitere Automation alle 30 Sekunden, ob die Entladung der Hausbatterie gesperrt werden soll. Sie ordnet den Restvorrat oberhalb der Notstromreserve von 10 % den teuersten Intervallen der nächsten 24 Stunden zu. Als Netzbezug je Intervall gilt der mittlere Hausverbrauch (`sensor.evcc_hausleistung_24h_mittel`) abzüglich der PV-Prognose. Der niedrigste Preis dieser Intervalle ist die Preisspitzen-Schwelle.
-
-- Die Entladung wird gesperrt (evcc-Modus `hold`), wenn die Batterie bei 50 % oder darunter mit mehr als 100 W entlädt und der aktuelle Preis um mehr als 0,02 €/kWh unter der Schwelle liegt.
-- Die Sperre wird alle 30 Sekunden erneuert, weil evcc den Modus nach 60 Sekunden zurücksetzt.
-- Sie wird aufgehoben, sobald der aktuelle Preis die Schwelle erreicht, der Ladestand 10 % unterschreitet oder 50 % überschreitet.
-- Der Helper `input_boolean.evcc_battery_discharge_hold` merkt sich, dass die Sperre von dieser Automation stammt. Nur dann wird sie wieder aufgehoben.
-- Hat die Nachtladung-Begrenzung `holdcharge` gesetzt, greift die Automation nicht ein.
-
-Startgrenze (50 %), Reserve (10 %) und Abstand (0,02 €/kWh) stehen als Variablen am Anfang der Automation.
-
-## Nachladen bei leerer Hausbatterie
-
-Der Batterie-Scheduler startet zusätzlich eine Nachladung, sobald der Ladestand 10 % oder weniger beträgt. Der Helper `input_boolean.evcc_battery_refill_active` merkt sich den aktiven Zustand.
-
-- Als Ziel gilt 10 % plus der erwartete Netzbezug (Hausverbrauch abzüglich PV-Prognose) der nächsten 24 Stunden in Intervallen, die mehr als 0,03 €/kWh über dem günstigsten Preis der nächsten 6 Stunden liegen (maximal 100 %).
-- Die PV-Prognose des Fensters (nächste 6 Stunden) wird zuerst angerechnet, höchstens jedoch bis zu einem Ladestand von 75 %; nur der Rest wird aus dem Netz geladen.
-- Dafür werden die günstigsten Intervalle des Fensters ohne PV-Überschuss gewählt (Ladeleistung 10,8 kW). Das Netzladelimit wird auf den Preis des teuersten gewählten Intervalls gesetzt, sodass nur in günstigen Intervallen geladen wird.
-- Bei gemessenem PV-Überschuss wird nicht aus dem Netz geladen.
-- Die Nachladung endet beim Erreichen des Ziels. Solange sie aktiv ist, setzt die Nachtladung-Begrenzung kein `holdcharge`.
-- Die Nachladung ist unabhängig vom Nachtziel; die Werte `refill_soc`, `refill_window_hours` und `refill_margin` stehen am Anfang des Schedulers.
-
-## Tageszeitabhängiges Hausverbrauchsprofil
-
-Home Assistant lernt die Hausleistung einschließlich Wärmepumpe, aber ohne Wallboxen, je Uhrzeit. Eine Automation schreibt stündlich den Mittelwert der letzten Stunde (`sensor.evcc_hausleistung_1h_mittel`) mit 30 % Gewicht in `input_text.evcc_hausleistung_profil` (24 kommagetrennte Watt-Werte, Index = Stunde). Beim ersten Lauf werden unbekannte Stunden mit dem ersten Messwert gefüllt; das Profil nähert sich in einigen Tagen der Realität an. Nachladung, Entladesperre und die PV-Überschussprüfung der täglichen Preisplanung verwenden je Intervall den Profilwert statt des 24-h-Mittels. Das Profil enthält die Wärmepumpe bereits; ein zusätzlicher Aufschlag würde sie doppelt zählen. Ist das Profil leer, gilt das 24-h-Mittel. Nach der Korrektur der Hauslast benötigt das bestehende Profil einige Tage, um sich anzupassen; einzelne Wärmepumpenstarts sind nicht vorhersagbar.
-
-## Temperaturabhängige Wärmepumpenprognose
-
-Stündlich lernt Home Assistant je Uhrzeit die Hausleistung ohne Wärmepumpe (`input_text.evcc_haus_ohne_wp_profil`) und die Wärmepumpenleistung je Kelvin unter 18 °C Außentemperatur (`input_text.evcc_wp_kelvin_profil`). `sensor.evcc_prognose_aussentemperatur_24h` kombiniert beides mit der Stundenprognose von `weather.forecast_home` und liefert im Attribut `profile` die erwartete Hausleistung je Uhrzeit. Stunden mit weniger als 3 K Heizbedarf, ohne Prognose oder ohne gelerntes Modell nutzen weiter das Gesamtprofil. Fehlt das Attribut, gilt ebenfalls das Gesamtprofil.
-
-## Rollierende Batterieladung
-
-Der Scheduler läuft jede Minute und lädt die Hausbatterie immer auf 100 %. Dafür bestimmt er aus den Preisen der nächsten 24 Stunden die günstigsten Intervalle ohne PV-Überschuss, deren Ladezeit (Ladeleistung 4 kW angenommen) für den Weg bis 100 % reicht, und gibt das evcc-Netzladelimit nur in diesen Intervallen frei. Bei höchstens 11 % Ladestand wird zusätzlich eine Stunde Ladung in den günstigsten Intervallen der nächsten 2 Stunden eingeplant, falls dort weder eine geplante Ladung noch PV-Überschuss liegt; sie läuft bis etwa 11 % plus 4 kWh. Die Entladesperre gilt bei jedem Ladestand oberhalb von 10 % und lässt die Batterie nur in den teuersten Intervallen der nächsten 24 Stunden entladen. Die tägliche Planung um 23:55 setzt nur noch die Wallbox-Preisgrenze.
-
-## Regeln nach Ladestand
-
-Die Batterie hält dauerhaft 10 % als Notstromreserve. Tagsüber wird PV-Überschuss nur bis 75 % in die Batterie geladen; darüber werden die Wallboxen aus dem PV-Überschuss bedient. In der Kalkulation gilt daher:
-
-- Mindestziel für die Nacht: 10 % Notstromreserve plus Nachtverbrauch.
-- PV-Aufnahmeraum der Batterie: nur bis 75 % statt bis 100 %. Das Nachtziel lautet `75 % − PV-Ertrag (in %) + Nachtverbrauch`, mindestens jedoch das Mindestziel.
-- Entladesperre: nutzbarer Restvorrat ist alles oberhalb von 10 %.
-- Nachladung: PV-Anteil höchstens bis 75 % anrechnen; darüber liefert der Überschuss keine Batterieladung mehr.
-
-```mermaid
-flowchart TB
-	subgraph S100["75 % bis 100 %: Wallboxen aus PV"]
-		direction TB
-		A1["PV-Überschuss lädt die Wallboxen, nicht die Batterie"]
-		A2["Netzladung der Batterie nur, wenn das Nachtziel es verlangt"]
-	end
-	subgraph S75["50 % bis 75 %: PV füllt die Batterie"]
-		direction TB
-		B1["PV-Überschuss lädt die Batterie"]
-		B2["Entladesperre für Preisspitzen möglich (bis 50 %)"]
-	end
-	subgraph S10["10 % bis 50 %: Preisoptimierung"]
-		direction TB
-		C1["Entladung wird für teuerste Intervalle gespart"]
-		C2["Netzladung nur in günstigen Intervallen bis zum Nachtziel"]
-	end
-	subgraph S0["höchstens 10 %: Notstromreserve"]
-		direction TB
-		D1["Keine Entladung unter 10 %"]
-		D2["Nachladung mit PV oder günstigstem Netzpreis der nächsten 6 h"]
-		D3["Ziel: 10 % plus Verbrauch in teuren Intervallen der nächsten 24 h"]
-	end
-	S100 --- S75 --- S10 --- S0
-```
-
-## Ablauf
-
-```mermaid
-flowchart LR
-	subgraph P["23:55 Planung"]
-		direction TB
-		A["Planner- und Solarprognose<br/>Nachtverbrauch (erster Lauf: 24-h-Mittel)"] --> B["Ziel = 10 % + Nachtverbrauch<br/>PV-Platz 08–22 Uhr bis 75 %"]
-		B --> C["Ladezeit bei 10,8 kW<br/>günstigste Intervalle ohne PV-Überschuss"]
-	end
-	subgraph R["Laufend"]
-		direction TB
-		D{"Ziel erreicht?"}
-		D -- Nein --> E(["Smart-Netzladung erlaubt"])
-		D -- Ja --> F(["holdcharge, alle 30 s erneuert"])
-		G(["Wallbox-Netzladung bei PV-Überschuss gesperrt"])
-	end
-	subgraph M["08:00"]
-		direction TB
-		H["Verbrauch der letzten 10 h speichern"] --> I["holdcharge aufheben"]
-	end
-	P --> R --> M
-	classDef plan fill:#e3f2fd,stroke:#1e88e5,color:#0d47a1
-	classDef run fill:#e8f5e9,stroke:#43a047,color:#1b5e20
-	classDef morning fill:#fff8e1,stroke:#fb8c00,color:#e65100
-	class A,B,C plan
-	class D,E,F,G run
-	class H,I morning
-```
-
-## Konfiguration
-
-Der Helper ist in `configuration.yaml` definiert; die Automation liegt in `automations.yaml`. Die von ihr verwendeten Entity-IDs sind:
-
-- `sensor.synboxen_forecast_planner`
-- `number.synboxen_synbox_01_smart_cost_limit`
-- `number.synboxen_synbox_02_smart_cost_limit`
-- `number.synboxen_battery_grid_charge_limit`
-- `sensor.synboxen_forecast_solar`
-- `sensor.synboxen_battery_soc`
-- `sensor.synboxen_battery_capacity`
-- `select.synboxen_battery_mode`
-- `input_number.evcc_night_consumption_kwh`
-- `input_number.evcc_wallbox_cost_limit`
-- `input_number.evcc_battery_grid_charge_price`
-- `input_number.evcc_battery_target_soc`
-- `sensor.synboxen_pv_power`
-- `sensor.synboxen_home_power`
-- `sensor.synboxen_battery_power`
-- `sensor.evcc_hausleistung_24h_mittel`
-- `input_boolean.evcc_battery_discharge_hold`
+Ein Klick auf die Legende blendet eine Serie ein oder aus; beim Aktualisieren kann sie wieder erscheinen. Diagrammhöhe, Farben, Darstellung und Zeitraum lassen sich in der YAML-Datei anpassen. `custom:apexcharts-card` muss als Ressource `/local/apexcharts-card.js?v=2.2.3` vom Typ **JavaScript-Modul** unter **Einstellungen → Dashboards → Ressourcen** registriert sein. Änderungen am YAML-Dashboard werden nach dem Neuladen der Seite sichtbar.
