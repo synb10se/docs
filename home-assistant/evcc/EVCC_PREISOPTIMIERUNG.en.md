@@ -92,9 +92,9 @@ Home Assistant learns house power including the heat pump but excluding wallboxe
 
 Home Assistant learns hourly, per time of day, the house load without the heat pump (`input_text.evcc_haus_ohne_wp_profil`) and the heat pump power per kelvin below 18 °C outdoor temperature (`input_text.evcc_wp_kelvin_profil`). `sensor.evcc_prognose_aussentemperatur_24h` combines both with the hourly forecast of `weather.forecast_home` and exposes the expected house load per hour of day in its `profile` attribute. Hours with less than 3 K heating demand, without a forecast, or without a learned model still use the combined profile. If the attribute is missing, the combined profile applies as well.
 
-## Charge target by expensive demand
+## Rolling battery charging
 
-The night target of the daily planning is at least the previous target, and at least 10 % plus the expected grid import (house profile minus PV forecast, divided by 0.9 discharge efficiency) in all intervals up to the first PV surplus that are more than 0.03 €/kWh above the charge price. Charge price and target depend on each other and are determined in four passes. The target is capped at the state of charge reachable in the cheap intervals before the PV surplus.
+The scheduler runs every minute and always charges the home battery to 100 %. From the prices of the next 24 hours it selects the cheapest intervals without PV surplus whose charging time (4 kW charging power assumed) is enough to reach 100 %, and releases the evcc grid charge limit only in those intervals. At 11 % state of charge or below, one hour of charging is additionally planned in the cheapest intervals of the next 2 hours if neither a planned charge nor PV surplus lies there; it runs until about 11 % plus 4 kWh. The discharge lock applies at every state of charge above 10 % and lets the battery discharge only in the most expensive intervals of the next 24 hours. The daily planning at 23:55 now only sets the wallbox price limit.
 
 ## Rules by state of charge
 

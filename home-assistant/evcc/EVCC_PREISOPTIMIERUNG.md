@@ -92,9 +92,9 @@ Home Assistant lernt die Hausleistung einschließlich Wärmepumpe, aber ohne Wal
 
 Stündlich lernt Home Assistant je Uhrzeit die Hausleistung ohne Wärmepumpe (`input_text.evcc_haus_ohne_wp_profil`) und die Wärmepumpenleistung je Kelvin unter 18 °C Außentemperatur (`input_text.evcc_wp_kelvin_profil`). `sensor.evcc_prognose_aussentemperatur_24h` kombiniert beides mit der Stundenprognose von `weather.forecast_home` und liefert im Attribut `profile` die erwartete Hausleistung je Uhrzeit. Stunden mit weniger als 3 K Heizbedarf, ohne Prognose oder ohne gelerntes Modell nutzen weiter das Gesamtprofil. Fehlt das Attribut, gilt ebenfalls das Gesamtprofil.
 
-## Ladeziel nach Teuerbedarf
+## Rollierende Batterieladung
 
-Das Nachtziel der täglichen Planung ist mindestens das bisherige Ziel, mindestens aber 10 % plus der erwartete Netzbezug (Hausprofil abzüglich PV-Prognose, geteilt durch 0,9 Entladewirkungsgrad) in allen Intervallen bis zum ersten PV-Überschuss, die mehr als 0,03 €/kWh über dem Ladepreis liegen. Ladepreis und Ziel hängen voneinander ab und werden in vier Durchläufen bestimmt. Das Ziel wird auf den Ladestand begrenzt, der in den günstigen Intervallen bis zum PV-Überschuss erreichbar ist.
+Der Scheduler läuft jede Minute und lädt die Hausbatterie immer auf 100 %. Dafür bestimmt er aus den Preisen der nächsten 24 Stunden die günstigsten Intervalle ohne PV-Überschuss, deren Ladezeit (Ladeleistung 4 kW angenommen) für den Weg bis 100 % reicht, und gibt das evcc-Netzladelimit nur in diesen Intervallen frei. Bei höchstens 11 % Ladestand wird zusätzlich eine Stunde Ladung in den günstigsten Intervallen der nächsten 2 Stunden eingeplant, falls dort weder eine geplante Ladung noch PV-Überschuss liegt; sie läuft bis etwa 11 % plus 4 kWh. Die Entladesperre gilt bei jedem Ladestand oberhalb von 10 % und lässt die Batterie nur in den teuersten Intervallen der nächsten 24 Stunden entladen. Die tägliche Planung um 23:55 setzt nur noch die Wallbox-Preisgrenze.
 
 ## Regeln nach Ladestand
 
