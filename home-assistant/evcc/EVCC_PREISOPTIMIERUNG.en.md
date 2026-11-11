@@ -7,7 +7,7 @@
 1. **PV to the home battery first:** Solar power not needed by the house is used to charge the home battery first.
 2. **Wallboxes from 75%:** Once the home battery is at least 75% charged, the wallboxes can also use surplus PV power.
 3. **Charge the home battery cheaply and use it at price peaks:** When the current electricity price is the lowest in the next six hours, the battery is charged from the grid as needed. Its energy should mainly cover expensive periods.
-4. **Charge vehicles cheaply:** For a connected vehicle, the cheapest charging intervals in the next 24 hours are selected based on its energy needs. Charging losses of about 5% are included.
+4. **Charge vehicles cheaply:** A grid price is considered cheap when it is below EUR 0.56/kWh with an average forecast price of at least EUR 0.60/kWh, or below EUR 0.44/kWh when the average is between EUR 0.50 and EUR 0.60/kWh. Prices below EUR 0.30/kWh are always considered cheap. Eligible intervals over the next 24 hours are selected based on the connected vehicle's energy needs. Charging losses of about 5% are included.
 5. **Account for the heat pump:** The consumption forecast uses learned heat-pump consumption and the outdoor temperature. Together with price and PV forecasts, it helps reserve battery energy for expensive periods.
 
 These rules apply when price optimization is enabled and the necessary data is available. The following sections explain the requirements and limitations.
@@ -27,7 +27,7 @@ flowchart TD
     G -->|Yes| N["Enable home-battery grid charging"]
     G -->|No| X["Defer home-battery grid charging"]
     P --> P24["Next 24 hours"]
-    P24 --> F["Select cheapest intervals for each vehicle"]
+    P24 --> F["Determine average price and eligible intervals"]
     D["Vehicle SoC, target, capacity and charging power"] --> F
     F --> L["Enable wallbox grid charging in selected intervals"]
 
@@ -63,7 +63,7 @@ The 10% is a **planning reserve**. The actual backup reserve must be configured 
 
 Each wallbox is planned independently every minute. For a connected, recognized vehicle, the automation calculates the energy deficit from the effective target SoC, current vehicle SoC and usable battery capacity. The deficit is divided by `0.95` to account for approximately 5% charging losses. The configured charging power determines the required charging time.
 
-The automation selects the cheapest intervals in the next 24 hours until enough charging time is available. Equal prices at the threshold can enable additional intervals. evcc stops charging at the configured vehicle target. The plan does not account for departure times and cannot guarantee charging by an earlier deadline.
+The time-weighted average price of forecast intervals in the next 24 hours determines the price limit: below EUR 0.56/kWh when the average is at least EUR 0.60/kWh, below EUR 0.44/kWh when the average is at least EUR 0.50 and below EUR 0.60/kWh, and otherwise below EUR 0.30/kWh. Prices below EUR 0.30/kWh remain eligible in every tier. The automation selects the cheapest eligible intervals until enough charging time is available. Equal prices at the threshold can enable additional intervals. evcc stops charging at the configured vehicle target. The plan does not account for departure times and cannot guarantee charging by an earlier deadline.
 
 ### Heat-Pump and House-Load Forecast
 

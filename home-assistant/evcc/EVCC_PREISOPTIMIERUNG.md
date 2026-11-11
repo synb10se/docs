@@ -7,7 +7,7 @@
 1. **PV zuerst in die Hausbatterie:** Sonnenstrom, den das Haus nicht benötigt, lädt vorrangig die Hausbatterie.
 2. **Wallboxen ab 75 %:** Sobald die Hausbatterie mindestens zu 75 % geladen ist, können auch die Wallboxen PV-Überschuss nutzen.
 3. **Hausbatterie günstig laden und bei Preisspitzen nutzen:** Ist der Strom jetzt am günstigsten innerhalb der nächsten sechs Stunden, wird die Batterie bei Bedarf aus dem Netz geladen. Ihre Energie soll vor allem teure Zeiten abdecken.
-4. **Fahrzeuge günstig laden:** Für ein angeschlossenes Fahrzeug werden die günstigsten Ladezeiten der nächsten 24 Stunden anhand seines Ladebedarfs ermittelt. Etwa 5 % Ladeverluste werden berücksichtigt.
+4. **Fahrzeuge günstig laden:** Ein Netzstrompreis gilt als günstig, wenn er unter 0,56 €/kWh bei einem durchschnittlichen Prognosepreis ab 0,60 €/kWh oder unter 0,44 €/kWh bei einem Durchschnitt zwischen 0,50 und 0,60 €/kWh liegt. Preise unter 0,30 €/kWh gelten immer als günstig. Für ein angeschlossenes Fahrzeug werden passende Ladezeiten der nächsten 24 Stunden entsprechend seinem Ladebedarf ausgewählt. Etwa 5 % Ladeverluste werden berücksichtigt.
 5. **Wärmepumpe berücksichtigen:** Die Verbrauchsprognose nutzt die gelernten Wärmepumpenverbräuche und die Außentemperatur. Zusammen mit der Preis- und PV-Prognose hilft sie, Batterieenergie für teure Zeiten einzuplanen.
 
 Diese Regeln gelten bei eingeschalteter Preisoptimierung und verfügbaren Daten. Die konkreten Voraussetzungen und Grenzen stehen in den folgenden Abschnitten.
@@ -27,7 +27,7 @@ flowchart TD
     G -->|Ja| N["Hausbatterie-Netzladung freigeben"]
     G -->|Nein| X["Hausbatterie-Netzladung zurückstellen"]
     P --> P24["Nächste 24 Stunden"]
-    P24 --> F["Pro Fahrzeug günstigste Ladeintervalle auswählen"]
+    P24 --> F["Durchschnittspreis und günstige Intervalle bestimmen"]
     D["Fahrzeug-SoC, Ladeziel, Kapazität und Ladeleistung"] --> F
     F --> L["Wallbox-Netzladung in ausgewählten Intervallen"]
 
@@ -63,7 +63,7 @@ Die 10 % sind eine **Planungsreserve**. Die tatsächliche Notstromreserve muss s
 
 Jede Wallbox wird minütlich und unabhängig geplant. Für ein angeschlossenes, erkanntes Fahrzeug berechnet die Automation den Energiebedarf aus der Differenz zwischen effektivem Ladeziel und Fahrzeug-Ladestand sowie der nutzbaren Batteriekapazität. Der Bedarf wird durch `0,95` geteilt, um rund 5 % Ladeverluste einzurechnen. Aus der eingestellten Ladeleistung ergibt sich die benötigte Ladezeit.
 
-Die Automation wählt die preisgünstigsten Intervalle der nächsten 24 Stunden, bis diese Ladezeit erreicht ist. Bei gleichen Preisen am Grenzwert können zusätzliche Intervalle freigegeben werden. evcc beendet die Ladung am eingestellten Fahrzeugziel. Die Planung berücksichtigt keine Abfahrtszeit und gewährleistet daher keine Ladung bis zu einem früheren Termin.
+Der zeitgewichtete Durchschnittspreis der Prognoseintervalle in den nächsten 24 Stunden bestimmt die Preisgrenze: unter 0,56 €/kWh bei einem Durchschnitt ab 0,60 €/kWh, unter 0,44 €/kWh bei einem Durchschnitt ab 0,50 und unter 0,60 €/kWh, ansonsten unter 0,30 €/kWh. Preise unter 0,30 €/kWh bleiben in jeder Stufe günstig. Die Automation wählt daraus die günstigsten Intervalle, bis die benötigte Ladezeit erreicht ist. Bei gleichen Preisen am Grenzwert können zusätzliche Intervalle freigegeben werden. evcc beendet die Ladung am eingestellten Fahrzeugziel. Die Planung berücksichtigt keine Abfahrtszeit und gewährleistet daher keine Ladung bis zu einem früheren Termin.
 
 ### Wärmepumpen- und Hauslastprognose
 
