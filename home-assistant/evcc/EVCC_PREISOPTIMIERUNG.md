@@ -7,7 +7,7 @@
 1. **PV zuerst in die Hausbatterie:** Sonnenstrom, den das Haus nicht benötigt, lädt vorrangig die Hausbatterie.
 2. **Wallboxen ab 75 %:** Sobald die Hausbatterie mindestens zu 75 % geladen ist, können auch die Wallboxen PV-Überschuss nutzen.
 3. **Hausbatterie günstig laden und bei Preisspitzen nutzen:** Ist der Strom jetzt am günstigsten innerhalb der nächsten sechs Stunden, wird die Batterie bei Bedarf aus dem Netz geladen. Ihre Energie soll vor allem teure Zeiten abdecken.
-4. **Fahrzeuge günstig laden:** Ein Netzstrompreis gilt als günstig, wenn er unter 0,56 €/kWh bei einem durchschnittlichen Prognosepreis ab 0,60 €/kWh oder unter 0,44 €/kWh bei einem Durchschnitt zwischen 0,50 und 0,60 €/kWh liegt. Preise unter 0,30 €/kWh gelten immer als günstig. Für ein angeschlossenes Fahrzeug werden passende Ladezeiten der nächsten 24 Stunden entsprechend seinem Ladebedarf ausgewählt. Etwa 5 % Ladeverluste werden berücksichtigt.
+4. **Fahrzeuge günstig laden:** Aus den günstigsten sechs Stunden der nächsten 24 Stunden wird eine gemeinsame Preisgrenze für die Wallboxen berechnet. Für jedes angeschlossene Fahrzeug werden darunter passende Ladezeiten entsprechend seinem Ladebedarf ausgewählt. Etwa 5 % Ladeverluste werden berücksichtigt; die Preisgrenze kann manuell angepasst werden.
 5. **Wärmepumpe berücksichtigen:** Die Verbrauchsprognose nutzt die gelernten Wärmepumpenverbräuche und die Außentemperatur. Zusammen mit der Preis- und PV-Prognose hilft sie, Batterieenergie für teure Zeiten einzuplanen.
 
 Diese Regeln gelten bei eingeschalteter Preisoptimierung und verfügbaren Daten. Die konkreten Voraussetzungen und Grenzen stehen in den folgenden Abschnitten.
@@ -27,7 +27,7 @@ flowchart TD
     G -->|Ja| N["Hausbatterie-Netzladung freigeben"]
     G -->|Nein| X["Hausbatterie-Netzladung zurückstellen"]
     P --> P24["Nächste 24 Stunden"]
-    P24 --> F["Durchschnittspreis und günstige Intervalle bestimmen"]
+    P24 --> F["Sechs günstigste Stunden und Preisgrenze bestimmen"]
     D["Fahrzeug-SoC, Ladeziel, Kapazität und Ladeleistung"] --> F
     F --> L["Wallbox-Netzladung in ausgewählten Intervallen"]
 
@@ -63,7 +63,9 @@ Die 10 % sind eine **Planungsreserve**. Die tatsächliche Notstromreserve muss s
 
 Jede Wallbox wird minütlich und unabhängig geplant. Für ein angeschlossenes, erkanntes Fahrzeug berechnet die Automation den Energiebedarf aus der Differenz zwischen effektivem Ladeziel und Fahrzeug-Ladestand sowie der nutzbaren Batteriekapazität. Der Bedarf wird durch `0,95` geteilt, um rund 5 % Ladeverluste einzurechnen. Aus der eingestellten Ladeleistung ergibt sich die benötigte Ladezeit.
 
-Der zeitgewichtete Durchschnittspreis der Prognoseintervalle in den nächsten 24 Stunden bestimmt die Preisgrenze: unter 0,56 €/kWh bei einem Durchschnitt ab 0,60 €/kWh, unter 0,44 €/kWh bei einem Durchschnitt ab 0,50 und unter 0,60 €/kWh, ansonsten unter 0,30 €/kWh. Preise unter 0,30 €/kWh bleiben in jeder Stufe günstig. Die Automation wählt daraus die günstigsten Intervalle, bis die benötigte Ladezeit erreicht ist. Bei gleichen Preisen am Grenzwert können zusätzliche Intervalle freigegeben werden. evcc beendet die Ladung am eingestellten Fahrzeugziel. Die Planung berücksichtigt keine Abfahrtszeit und gewährleistet daher keine Ladung bis zu einem früheren Termin.
+Bei einer nahezu vollständigen 24-Stunden-Preisprognose bestimmt die Automation den höchsten Preis der sechs günstigsten Stunden und schreibt ihn aufgerundet in `input_number.evcc_wallbox_cost_limit`. Intervalllängen werden berücksichtigt. Bei gleichen Preisen am Grenzwert oder durch die Rundung können mehr als sechs Stunden infrage kommen. Die Automation wählt für jede Wallbox die günstigsten Intervalle bis zur benötigten Ladezeit, höchstens bis zur gemeinsamen Preisgrenze. Reicht die verfügbare Zeit nicht für den gesamten Bedarf, kann trotzdem teilweise geladen werden. evcc beendet die Ladung am eingestellten Fahrzeugziel. Die Planung berücksichtigt keine Abfahrtszeit und gewährleistet daher keine Ladung bis zu einem früheren Termin.
+
+Der Helfer kann manuell angepasst werden und wirkt auf beide Wallboxen. Die Korrektur bleibt bis zur nächsten Änderung des Preisprognose-Attributs, zum Neustart von Home Assistant oder zum erneuten Einschalten der Optimierung bestehen, sofern dann eine ausreichende Prognose vorliegt. Die tatsächlichen Grenzwerte der einzelnen Wallboxen können wegen Ladebedarf und PV-Vorrang niedriger sein oder auf den Sperrwert gesetzt werden.
 
 ### Wärmepumpen- und Hauslastprognose
 
@@ -73,7 +75,7 @@ Fehlen ein geeignetes Modell oder eine Temperaturprognose, fällt die Berechnung
 
 ### Fehlende Daten und Preisgrenzen
 
-Für die Wallbox-Netzfreigabe sind unter anderem ein erkanntes Fahrzeug, gültige Lade- und PV-Daten, eine weitgehend vollständige 24-Stunden-Preisprognose sowie genügend Ladezeit im Fenster erforderlich. Für die Batterie-Netzfreigabe werden gültige Messwerte und nahezu sechs Stunden Preisprognose benötigt. Fehlen diese Voraussetzungen, setzt die jeweilige Automation den Netzladegrenzwert auf den Sperrwert.
+Für die Wallbox-Netzfreigabe sind unter anderem ein erkanntes Fahrzeug, gültige Lade- und PV-Daten, eine weitgehend vollständige 24-Stunden-Preisprognose und mindestens ein passendes Intervall erforderlich. Für die Batterie-Netzfreigabe werden gültige Messwerte und nahezu sechs Stunden Preisprognose benötigt. Fehlen diese Voraussetzungen, setzt die jeweilige Automation den Netzladegrenzwert auf den Sperrwert.
 
 Der Sperrwert beträgt `-0,5 €/kWh`, die kleinste einstellbare Smart-Preisgrenze. Bei Strompreisen auf oder unter diesem Wert kann er die Netzladung nicht zuverlässig sperren. Freigabegrenzen werden auf die evcc-Schrittweite von `0,005 €/kWh` aufgerundet. Bei nicht erreichbarer oder ungültiger Grenzwert-Entität kann die Automation den bestehenden Wert nicht ändern.
 
@@ -85,7 +87,7 @@ Der Sperrwert beträgt `-0,5 €/kWh`, die kleinste einstellbare Smart-Preisgren
 4. `input_number.evcc_synbox_01_charge_power` und `input_number.evcc_synbox_02_charge_power` auf die verfügbare Netzladeleistung in kW setzen. Fahrzeug, Phasen, Strombegrenzung und Lastmanagement berücksichtigen; Werte konservativ wählen und bei Änderungen anpassen.
 5. Die 10-%-Notstromreserve in der Batterie oder in evcc konfigurieren. Anschließend `input_boolean.evcc_smart_price_optimizer` einschalten und Fahrzeugzuordnung, Messwerte, Preisgrenzen und erste Schaltungen unter **Entwicklerwerkzeuge → Zustände** prüfen.
 
-Der Schalter pausiert die Optimierung, setzt aber bereits geschriebene Grenzwerte nicht automatisch zurück. `input_number.evcc_wallbox_cost_limit` und `input_boolean.evcc_battery_refill_active` steuern die aktuelle Planung nicht mehr.
+Der Schalter pausiert die Optimierung, setzt aber bereits geschriebene Grenzwerte nicht automatisch zurück. `input_boolean.evcc_battery_refill_active` steuert die aktuelle Planung nicht mehr.
 
 ## 5. Dashboard Energiestatistiken
 

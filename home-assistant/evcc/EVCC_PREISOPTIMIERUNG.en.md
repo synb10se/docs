@@ -7,7 +7,7 @@
 1. **PV to the home battery first:** Solar power not needed by the house is used to charge the home battery first.
 2. **Wallboxes from 75%:** Once the home battery is at least 75% charged, the wallboxes can also use surplus PV power.
 3. **Charge the home battery cheaply and use it at price peaks:** When the current electricity price is the lowest in the next six hours, the battery is charged from the grid as needed. Its energy should mainly cover expensive periods.
-4. **Charge vehicles cheaply:** A grid price is considered cheap when it is below EUR 0.56/kWh with an average forecast price of at least EUR 0.60/kWh, or below EUR 0.44/kWh when the average is between EUR 0.50 and EUR 0.60/kWh. Prices below EUR 0.30/kWh are always considered cheap. Eligible intervals over the next 24 hours are selected based on the connected vehicle's energy needs. Charging losses of about 5% are included.
+4. **Charge vehicles cheaply:** A shared wallbox price cap is calculated from the cheapest six hours in the next 24 hours. Eligible intervals below the cap are selected for each connected vehicle based on its energy needs. Charging losses of about 5% are included; the cap can be adjusted manually.
 5. **Account for the heat pump:** The consumption forecast uses learned heat-pump consumption and the outdoor temperature. Together with price and PV forecasts, it helps reserve battery energy for expensive periods.
 
 These rules apply when price optimization is enabled and the necessary data is available. The following sections explain the requirements and limitations.
@@ -27,7 +27,7 @@ flowchart TD
     G -->|Yes| N["Enable home-battery grid charging"]
     G -->|No| X["Defer home-battery grid charging"]
     P --> P24["Next 24 hours"]
-    P24 --> F["Determine average price and eligible intervals"]
+    P24 --> F["Determine cheapest six hours and price cap"]
     D["Vehicle SoC, target, capacity and charging power"] --> F
     F --> L["Enable wallbox grid charging in selected intervals"]
 
@@ -63,7 +63,9 @@ The 10% is a **planning reserve**. The actual backup reserve must be configured 
 
 Each wallbox is planned independently every minute. For a connected, recognized vehicle, the automation calculates the energy deficit from the effective target SoC, current vehicle SoC and usable battery capacity. The deficit is divided by `0.95` to account for approximately 5% charging losses. The configured charging power determines the required charging time.
 
-The time-weighted average price of forecast intervals in the next 24 hours determines the price limit: below EUR 0.56/kWh when the average is at least EUR 0.60/kWh, below EUR 0.44/kWh when the average is at least EUR 0.50 and below EUR 0.60/kWh, and otherwise below EUR 0.30/kWh. Prices below EUR 0.30/kWh remain eligible in every tier. The automation selects the cheapest eligible intervals until enough charging time is available. Equal prices at the threshold can enable additional intervals. evcc stops charging at the configured vehicle target. The plan does not account for departure times and cannot guarantee charging by an earlier deadline.
+Given a nearly complete 24-hour price forecast, the automation takes the highest price of the cheapest six hours, rounds it up and writes it to `input_number.evcc_wallbox_cost_limit`. Interval lengths are taken into account. Equal prices at the threshold or rounding can make more than six hours eligible. For each wallbox, the cheapest intervals are selected up to the required charging time and the shared price cap. Partial charging remains possible when there is not enough eligible time for the full demand. evcc stops charging at the configured vehicle target. The plan does not account for departure times and cannot guarantee charging by an earlier deadline.
+
+The helper can be adjusted manually and applies to both wallboxes. The adjustment remains until the price forecast attribute changes, Home Assistant restarts or optimization is re-enabled, provided a sufficient forecast is then available. Individual wallbox limits may be lower or set to the blocking value because of charging demand and PV priority.
 
 ### Heat-Pump and House-Load Forecast
 
@@ -73,7 +75,7 @@ Without a suitable model or temperature forecast, the calculation falls back to 
 
 ### Missing Data and Price Limits
 
-Wallbox grid charging requires, among other things, a recognized vehicle, valid charging and PV measurements, a nearly complete 24-hour price forecast and enough charging time in that window. Home-battery grid charging requires valid measurements and nearly six hours of prices. When these requirements are not met, the respective automation sets its grid charging limit to the blocking value.
+Wallbox grid charging requires, among other things, a recognized vehicle, valid charging and PV measurements, a nearly complete 24-hour price forecast and at least one eligible interval. Home-battery grid charging requires valid measurements and nearly six hours of prices. When these requirements are not met, the respective automation sets its grid charging limit to the blocking value.
 
 The blocking value is `-0.5 EUR/kWh`, the lowest configurable Smart price limit. At prices equal to or below it, grid charging cannot reliably be blocked. Release limits are rounded up to evcc's `0.005 EUR/kWh` step. If a limit entity is unavailable or invalid, the automation cannot change its existing value.
 
@@ -85,7 +87,7 @@ The blocking value is `-0.5 EUR/kWh`, the lowest configurable Smart price limit.
 4. Set `input_number.evcc_synbox_01_charge_power` and `input_number.evcc_synbox_02_charge_power` to the available grid charging power in kW. Account for the vehicle, phases, current limits and load management; choose conservative values and update them when circumstances change.
 5. Configure the 10% backup reserve in the battery or evcc. Enable `input_boolean.evcc_smart_price_optimizer`, then check vehicle assignments, measurements, price limits and the first control actions under **Developer Tools → States**.
 
-The switch pauses optimization but does not automatically reset limits already written. `input_number.evcc_wallbox_cost_limit` and `input_boolean.evcc_battery_refill_active` no longer control the current plan.
+The switch pauses optimization but does not automatically reset limits already written. `input_boolean.evcc_battery_refill_active` no longer controls the current plan.
 
 ## 5. Energy Statistics Dashboard
 
