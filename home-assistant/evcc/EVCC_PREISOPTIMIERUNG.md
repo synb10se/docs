@@ -2,50 +2,39 @@
 
 [English version](EVCC_PREISOPTIMIERUNG.en.md)
 
-## 1. Die fünf Regeln
+## 1. Zuständigkeiten
 
-1. **PV zuerst in die Hausbatterie:** Sonnenstrom, den das Haus nicht benötigt, lädt vorrangig die Hausbatterie.
-2. **Wallboxen ab 75 %:** Sobald die Hausbatterie mindestens zu 75 % geladen ist, können auch die Wallboxen PV-Überschuss nutzen.
-3. **Hausbatterie günstig laden und bei Preisspitzen nutzen:** Ist der Strom jetzt am günstigsten innerhalb der nächsten sechs Stunden, wird die Batterie bei Bedarf aus dem Netz geladen. Ihre Energie soll vor allem teure Zeiten abdecken.
-4. **Fahrzeuge günstig laden:** Aus den günstigsten sechs Stunden der nächsten 24 Stunden wird eine gemeinsame Preisgrenze für die Wallboxen berechnet. Für jedes angeschlossene Fahrzeug werden darunter passende Ladezeiten entsprechend seinem Ladebedarf ausgewählt. Etwa 5 % Ladeverluste werden berücksichtigt; die Preisgrenze kann manuell angepasst werden.
-5. **Wärmepumpe berücksichtigen:** Die Verbrauchsprognose nutzt die gelernten Wärmepumpenverbräuche und die Außentemperatur. Zusammen mit der Preis- und PV-Prognose hilft sie, Batterieenergie für teure Zeiten einzuplanen.
+1. **EVCC steuert Wallboxen und Fahrzeuge:** Fahrzeugerkennung, Ladepunktzuordnung, Ladeziele und PV-Überschussregeln liegen vollständig in EVCC. Home Assistant ändert weder Wallbox-Modi noch Ladegrenzen oder EVCC-Prioritäten.
+2. **Home Assistant optimiert nur die Hausbatterie:** Die Netzladung wird anhand der EPEX-Preisprognose geplant. Eine Verbrauchsprognose aus Hauslast und Wärmepumpe hilft, Batteriereserven für erwartete teure Netzbezugszeiten einzuplanen.
+3. **Energiestatistiken bleiben unverändert:** Bestehende Leistungs- und Energiequellen, Zähler und Dashboard werden von der Umstellung nicht verändert.
 
-Diese Regeln gelten bei eingeschalteter Preisoptimierung und verfügbaren Daten. Die konkreten Voraussetzungen und Grenzen stehen in den folgenden Abschnitten.
+Die Batterieoptimierung läuft bei eingeschaltetem Schalter `input_boolean.evcc_smart_price_optimizer` und verfügbaren Daten. Die PV-Überschussregeln der Wallboxen werden ausschließlich in EVCC festgelegt und sind dort einstellbar.
 
 ## 2. Grafische Übersicht
 
 ```mermaid
 flowchart TD
-    PV["PV-Erzeugung und Hausverbrauch"] --> U{"PV-Überschuss?"}
-    U -->|Ja| S{"Hausbatterie mindestens 75 %?"}
-    S -->|Nein| B["Hausbatterie hat PV-Vorrang"]
-    S -->|Ja| W["Wallboxen können PV nutzen"]
+    PV["PV-Erzeugung und Hausverbrauch"] --> W["EVCC-Regeln für PV-Überschuss"]
 
     P["Strompreisprognose"] --> P6["Nächste 6 Stunden"]
-    P6 --> G{"Preis am günstigsten und kein relevanter PV-Überschuss?"}
-    U --> G
+    P6 --> G{"Günstigster Preis der nächsten 6 Stunden und kein PV-Überschuss?"}
     G -->|Ja| N["Hausbatterie-Netzladung freigeben"]
     G -->|Nein| X["Hausbatterie-Netzladung zurückstellen"]
-    P --> P24["Nächste 24 Stunden"]
-    P24 --> F["Sechs günstigste Stunden und Preisgrenze bestimmen"]
-    D["Fahrzeug-SoC, Ladeziel, Kapazität und Ladeleistung"] --> F
-    F --> L["Wallbox-Netzladung in ausgewählten Intervallen"]
-
-    T["Außentemperatur und gelernter Wärmepumpenverbrauch"] --> V["Hausverbrauch prognostizieren"]
-    V --> E["Batterieenergie für teure Bezugszeiten einplanen"]
+    P --> P24["EPEX-Preise nächste 24 Stunden"]
+    T["Hauslast und Wärmepumpenverbrauch"] --> V["Netzbezug prognostizieren"]
+    PVF["PV-Prognose"] --> V
+    V --> E["Batterie für teure Bezugszeiten einplanen"]
     P24 --> E
-    PVF["PV-Prognose"] --> E
+    E --> N
 ```
 
-PV-Nutzung, Netzladung und Entladesperre sind getrennte Entscheidungen. Die Grafik zeigt ihre Zusammenhänge; eine Netzfreigabe garantiert nicht, dass die Geräte tatsächlich laden.
+EVCC entscheidet über die Wallboxladung. Die Home-Assistant-Optimierung beeinflusst ausschließlich die Hausbatterie; eine Netzladefreigabe garantiert nicht, dass die Batterie tatsächlich lädt.
 
 ## 3. Umsetzung
 
-### PV-Vorrang
+### PV-Überschussregeln in EVCC
 
-Bei aktivierter Optimierung setzt Home Assistant die evcc-Einstellung `select.synboxen_priority_soc` auf 75 %, sofern diese Option verfügbar ist. Unterhalb von 75 % hat die Hausbatterie beim PV-Überschuss Vorrang. Ab 75 % können Wallboxen Überschuss erhalten; die Batterie wird dadurch nicht grundsätzlich vom PV-Laden ausgeschlossen.
-
-Zusätzlich sperrt die Wallboxplanung die Netzfreigabe, wenn die Hausbatterie unter 75 % liegt und PV-Leistung über dem Hausverbrauch gemessen wird. Hierfür verwendet sie `sensor.synboxen_pv_power` und `sensor.synboxen_home_power`. Die Wallboxen müssen in evcc im Modus **Smart** betrieben werden.
+Die Priorität für PV-Überschuss und das Verhalten der Wallboxen werden ausschließlich in EVCC konfiguriert. Home Assistant setzt weder `select.synboxen_priority_soc` noch Wallbox-Preisgrenzen oder Lademodi.
 
 ### Hausbatterie aus dem Netz laden
 
@@ -59,13 +48,11 @@ Alle 30 Sekunden berechnet die Entladesperre den erwarteten Netzbezug der nächs
 
 Die 10 % sind eine **Planungsreserve**. Die tatsächliche Notstromreserve muss separat in der Batterie oder in evcc eingerichtet sein. Die Sperre kann nur beeinflussen, wann die Batterie entlädt; sie garantiert nicht, dass genug Energie für alle späteren Spitzen vorhanden ist.
 
-### Fahrzeugladung planen
+### Fahrzeugerkennung in EVCC
 
-Jede Wallbox wird minütlich und unabhängig geplant. Für ein angeschlossenes, erkanntes Fahrzeug berechnet die Automation den Energiebedarf aus der Differenz zwischen effektivem Ladeziel und Fahrzeug-Ladestand sowie der nutzbaren Batteriekapazität. Der Bedarf wird durch `0,95` geteilt, um rund 5 % Ladeverluste einzurechnen. Aus der eingestellten Ladeleistung ergibt sich die benötigte Ladezeit.
+Home Assistant ordnet Fahrzeuge nicht mehr selbst zu. `select.synboxen_synbox_01_vehicle_name` zeigt die von EVCC für den Ladepunkt gelieferte Fahrzeugauswahl; es ist keine unabhängige Erkennung. Prüfe bei fehlender automatischer Erkennung zuerst in der EVCC-Oberfläche, ob `KillerMinion` als Fahrzeug angelegt ist und ob der Ladepunkt `SynBox-01` eine Erkennung unterstützt und aktiviert hat. Danach EVCC-Logs und die Fahrzeug-/Ladepunktkonfiguration prüfen. Ein manuelles Auswählen in EVCC kann die Zuordnung testen, ersetzt aber nicht die Ursachenbehebung der Erkennung.
 
-Bei einer nahezu vollständigen 24-Stunden-Preisprognose bestimmt die Automation den höchsten Preis der sechs günstigsten Stunden und schreibt ihn aufgerundet in `input_number.evcc_wallbox_cost_limit`. Intervalllängen werden berücksichtigt. Bei gleichen Preisen am Grenzwert oder durch die Rundung können mehr als sechs Stunden infrage kommen. Die Automation wählt für jede Wallbox die günstigsten Intervalle bis zur benötigten Ladezeit, höchstens bis zur gemeinsamen Preisgrenze. Reicht die verfügbare Zeit nicht für den gesamten Bedarf, kann trotzdem teilweise geladen werden. evcc beendet die Ladung am eingestellten Fahrzeugziel. Die Planung berücksichtigt keine Abfahrtszeit und gewährleistet daher keine Ladung bis zu einem früheren Termin.
-
-Der Helfer kann manuell angepasst werden und wirkt auf beide Wallboxen. Die Korrektur bleibt bis zur nächsten Änderung des Preisprognose-Attributs, zum Neustart von Home Assistant oder zum erneuten Einschalten der Optimierung bestehen, sofern dann eine ausreichende Prognose vorliegt. Die tatsächlichen Grenzwerte der einzelnen Wallboxen können wegen Ladebedarf und PV-Vorrang niedriger sein oder auf den Sperrwert gesetzt werden.
+Die EVCC-Serverkonfiguration und aktuelle EVCC-Logs liegen nicht in diesem Home-Assistant-Workspace. Deshalb lässt sich die konkrete Ursache hier nicht sicher bestimmen. Für eine belastbare Diagnose werden die EVCC-Loadpoint- und Fahrzeugkonfiguration sowie die Logmeldungen beim Anstecken benötigt.
 
 ### Wärmepumpen- und Hauslastprognose
 
@@ -75,19 +62,19 @@ Fehlen ein geeignetes Modell oder eine Temperaturprognose, fällt die Berechnung
 
 ### Fehlende Daten und Preisgrenzen
 
-Für die Wallbox-Netzfreigabe sind unter anderem ein erkanntes Fahrzeug, gültige Lade- und PV-Daten, eine weitgehend vollständige 24-Stunden-Preisprognose und mindestens ein passendes Intervall erforderlich. Für die Batterie-Netzfreigabe werden gültige Messwerte und nahezu sechs Stunden Preisprognose benötigt. Fehlen diese Voraussetzungen, setzt die jeweilige Automation den Netzladegrenzwert auf den Sperrwert.
+Für die Batterie-Netzfreigabe werden gültige Messwerte und nahezu sechs Stunden Preisprognose benötigt. Bei fehlenden Voraussetzungen wird die Netzladung zurückgestellt. Die Wallboxsteuerung ist davon unabhängig und verbleibt vollständig in EVCC.
 
 Der Sperrwert beträgt `-0,5 €/kWh`, die kleinste einstellbare Smart-Preisgrenze. Bei Strompreisen auf oder unter diesem Wert kann er die Netzladung nicht zuverlässig sperren. Freigabegrenzen werden auf die evcc-Schrittweite von `0,005 €/kWh` aufgerundet. Bei nicht erreichbarer oder ungültiger Grenzwert-Entität kann die Automation den bestehenden Wert nicht ändern.
 
 ## 4. Einrichtung und Kontrolle
 
-1. In evcc den Planner-Tarif mit Strompreisen konfigurieren, beide Wallboxen auf **Smart** stellen und die Preisgrenzen sowie `select.synboxen_priority_soc` und `select.synboxen_battery_mode` verfügbar machen. Die PV-Prognose sollte beide Dachflächen enthalten.
-2. Home Assistant nach den Konfigurationsänderungen neu starten, damit die neuen Helfer angelegt werden.
-3. `input_number.evcc_killerminion_capacity` und `input_number.evcc_goldensnitch_capacity` auf die nutzbaren Fahrzeugbatteriekapazitäten in kWh setzen. Die Zuordnung gilt für die in evcc erkannten Fahrzeuge `KillerMinion` und `GoldenSnitch`; andere Fahrzeugnamen erfordern eine Anpassung der Automation.
-4. `input_number.evcc_synbox_01_charge_power` und `input_number.evcc_synbox_02_charge_power` auf die verfügbare Netzladeleistung in kW setzen. Fahrzeug, Phasen, Strombegrenzung und Lastmanagement berücksichtigen; Werte konservativ wählen und bei Änderungen anpassen.
-5. Die 10-%-Notstromreserve in der Batterie oder in evcc konfigurieren. Anschließend `input_boolean.evcc_smart_price_optimizer` einschalten und Fahrzeugzuordnung, Messwerte, Preisgrenzen und erste Schaltungen unter **Entwicklerwerkzeuge → Zustände** prüfen.
+Nach dem Neuladen der Home-Assistant-Konfiguration in EVCC die bestehenden Preisgrenzen beider Wallboxen und die PV-Priorität prüfen. Die früheren Automationen können dort Werte hinterlassen haben; das Entfernen der Automationen setzt diese EVCC-Werte nicht zurück. Gewünschte Grenzen und PV-Regeln direkt in EVCC einstellen.
 
-Der Schalter pausiert die Optimierung, setzt aber bereits geschriebene Grenzwerte nicht automatisch zurück. `input_boolean.evcc_battery_refill_active` steuert die aktuelle Planung nicht mehr.
+1. In EVCC den Planner-Tarif und die gewünschten PV-Überschussregeln für beide Wallboxen konfigurieren. Die Fahrzeugerkennung für `KillerMinion` am Ladepunkt `SynBox-01` in EVCC prüfen.
+2. In Home Assistant muss `number.synboxen_battery_grid_charge_limit` verfügbar sein. Die Wetter-, Hauslast-, Wärmepumpen- und EPEX-Prognosen sollten gültige Werte liefern.
+3. Die 10-%-Notstromreserve in der Batterie oder in EVCC konfigurieren. Anschließend `input_boolean.evcc_smart_price_optimizer` einschalten und Batterie-Modus, Netzladegrenze und Prognosen unter **Entwicklerwerkzeuge → Zustände** prüfen.
+
+Der Schalter pausiert ausschließlich die Batterie-Preisoptimierung. Bereits geschriebene Batteriegrenzen werden beim Ausschalten nicht automatisch zurückgesetzt.
 
 ## 5. Dashboard Energiestatistiken
 
