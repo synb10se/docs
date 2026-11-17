@@ -4,8 +4,8 @@
 
 ## 1. Responsibilities
 
-1. **EVCC controls wallboxes and vehicles:** Vehicle detection, loadpoint assignment, charging targets and PV-surplus rules are managed entirely by EVCC. Home Assistant does not change wallbox modes, charging limits or EVCC priorities.
-2. **Home Assistant optimizes only the home battery:** Grid charging is planned using the EPEX price forecast. A consumption forecast for household load and the heat pump helps reserve battery energy for expected expensive grid-import periods.
+1. **EVCC controls wallboxes and vehicles:** Vehicle detection, loadpoint assignment, charging targets and PV-surplus rules remain in EVCC. Home Assistant sets both wallbox smart charging price limits daily.
+2. **Home Assistant optimizes the home battery:** The current grid price, state of charge, and PV and household-load forecasts determine the hourly grid-charging decision.
 3. **Energy statistics remain unchanged:** Existing power and energy sources, meters and dashboard are not changed by this adjustment.
 
 Battery optimization runs while `input_boolean.evcc_smart_price_optimizer` is enabled and the required data is available. Wallbox PV-surplus rules remain configurable in EVCC.
@@ -16,37 +16,30 @@ Battery optimization runs while `input_boolean.evcc_smart_price_optimizer` is en
 flowchart TD
     PV["PV generation and house load"] --> W["EVCC PV-surplus rules"]
 
-    P["Electricity price forecast"] --> P6["Next 6 hours"]
-    P6 --> G{"Lowest price in next 6 hours and no PV surplus?"}
+    P["Electricity price forecast"] --> W24["Cheapest 360 minutes in next 24 hours"]
+    W24 --> W
+    P --> P3["Three hours after current price interval"]
+    P3 --> G{"Battery at most 50%, current price lower, no PV surplus in 2 hours?"}
     G -->|Yes| N["Enable home-battery grid charging"]
     G -->|No| X["Defer home-battery grid charging"]
-    P --> P24["EPEX prices for next 24 hours"]
-    T["Household load and heat-pump consumption"] --> V["Forecast grid import"]
-    PVF["PV forecast"] --> V
-    V --> E["Reserve battery for expensive periods"]
-    P24 --> E
-    E --> N
+    T["Household load and PV forecast"] --> G
 ```
 
-EVCC decides how the wallboxes charge. Home Assistant optimization affects only the home battery; permission to grid-charge does not guarantee that the battery will charge.
+EVCC decides whether charging actually takes place; a price limit does not guarantee charging.
 
 ## 3. Implementation
 
 ### EVCC PV-Surplus Rules
 
-PV-surplus priority and wallbox behavior are configured exclusively in EVCC. Home Assistant does not set `select.synboxen_priority_soc`, wallbox price limits or charging modes.
+PV-surplus priority and charging modes remain configured in EVCC. At 20:00 each day, Home Assistant selects the cheapest 360 minutes in the next 24 hours from the planner tariff. The highest selected price becomes both wallboxes' smart charging limit. Equal prices, rounding or long price intervals can allow more than 360 minutes; a price limit cannot specify exact charging times.
 
 ### Home Battery Grid Charging
 
-Every minute, the automation compares the current planner price with the lowest price in the next six hours. When they match, grid charging can be enabled up to 100%. Grid charging is deferred when PV surplus is measured; hysteresis at 200 and 500 W reduces switching.
-
-There is no separate low-SoC emergency refill. Grid charging still depends on the price check and available data when the battery is low.
+On the hour, grid charging is enabled when the battery is at most 50% charged, no PV surplus over the hourly household-load forecast is expected in the next two hours, and the current planner price is strictly below every price in the three hours following the current price interval. The automation sets `input_number.evcc_battery_grid_charge_price` and the actual EVCC grid-charge limit to the current price, rounded up to the supported step. Otherwise only the EVCC grid-charge limit is set to the blocking value; the last planned price remains unchanged.
 
 ### Save Battery Energy for Price Peaks
 
-Every 30 seconds, the discharge-hold automation estimates grid import for the next 24 hours from the house load and PV forecast. Battery energy above 10% is allocated to the most expensive intervals. If the current price is sufficiently lower, evcc can temporarily block discharging with `hold`; a hold set by this automation is released when grid charging is enabled or active.
-
-The 10% is a **planning reserve**. The actual backup reserve must be configured separately in the battery or evcc. The hold can influence when the battery discharges; it cannot guarantee enough energy for every later peak.
+The former automatic discharge hold is disabled. A hold it previously set is released at the next hourly check while battery optimization is enabled.
 
 ### Vehicle Detection in EVCC
 
@@ -62,17 +55,19 @@ Without a suitable model or temperature forecast, the calculation falls back to 
 
 ### Missing Data and Price Limits
 
-Home-battery grid charging requires valid measurements and a nearly six-hour price forecast. When the requirements are not met, grid charging is deferred. Wallbox control is independent and remains entirely in EVCC.
+The wallbox calculation requires a complete 24-hour price forecast; otherwise both limits remain unchanged. The battery check requires valid charge and price readings, a full three-hour price forecast after the current interval, and two hours of PV and household-load forecasts. Missing data defers grid charging. PV surplus is a forecast, not a guarantee.
+
+The blocking value is `-0.5 EUR/kWh`, the lowest configurable limit. At prices at or below this value it cannot reliably prevent grid charging. Enabled limits are rounded up to the EVCC step of `0.005 EUR/kWh`.
 
 ## 4. Setup and Checks
 
-After reloading the Home Assistant configuration, review both wallbox price limits and the PV priority in EVCC. The former automations may have left values there; removing the automations does not reset EVCC settings. Set the desired limits and PV rules directly in EVCC.
+After reloading Home Assistant automations, check the forecasts and price limits. The first wallbox calculation runs at 20:00 and the first battery check on the next full hour.
 
 1. Configure the planner tariff and the desired PV-surplus rules for both wallboxes in EVCC. Check `KillerMinion` vehicle detection at loadpoint `SynBox-01` in EVCC.
-2. In Home Assistant, `number.synboxen_battery_grid_charge_limit` must be available. The weather, household-load, heat-pump and EPEX forecasts should provide valid values.
-3. Configure the 10% backup reserve in the battery or EVCC. Enable `input_boolean.evcc_smart_price_optimizer`, then check the battery mode, grid-charge limit and forecasts under **Developer Tools → States**.
+2. Both smart charging limits, `number.synboxen_battery_grid_charge_limit`, and the planner, PV and household-load forecasts must be available in Home Assistant.
+3. Configure the desired backup reserve in the battery or EVCC. Enable `input_boolean.evcc_smart_price_optimizer`, then check the battery mode, grid-charge limit and forecasts under **Developer Tools → States**.
 
-The switch pauses only battery price optimization. Existing battery limits are not automatically reset when it is turned off.
+The switch pauses only battery price optimization; the wallbox calculation runs independently. Existing limits are not automatically reset when it is turned off.
 
 ## 5. Energy Statistics Dashboard
 
