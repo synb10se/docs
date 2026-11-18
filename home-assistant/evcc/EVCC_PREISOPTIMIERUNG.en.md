@@ -31,7 +31,9 @@ EVCC decides whether charging actually takes place; a price limit does not guara
 
 ### EVCC PV-Surplus Rules
 
-PV-surplus priority and charging modes remain configured in EVCC. At 20:00 each day, Home Assistant selects the cheapest 360 minutes in the next 24 hours from the planner tariff. The highest selected price becomes both wallboxes' smart charging limit. Equal prices, rounding or long price intervals can allow more than 360 minutes; a price limit cannot specify exact charging times.
+PV-surplus priority and charging modes remain configured in EVCC. At 20:00 each day and whenever either wallbox is connected, Home Assistant selects the cheapest 360 minutes in the next 24 hours from the planner tariff. The highest selected price becomes both wallboxes' smart charging limit. Equal prices, rounding or long price intervals can allow more than 360 minutes; a price limit cannot specify exact charging times.
+
+When a vehicle is connected, Home Assistant sets that EVCC loadpoint to `now` for 15 minutes so EVCC can attempt vehicle detection during an actual charging session. It then switches back to `smart` if the vehicle is still connected; disconnecting switches back immediately. `now` can charge during this period regardless of the price limit. This automation does not guarantee that EVCC detects or assigns the vehicle correctly.
 
 ### Home Battery Grid Charging
 
@@ -61,7 +63,7 @@ The blocking value is `-0.5 EUR/kWh`, the lowest configurable limit. At prices a
 
 ## 4. Setup and Checks
 
-After reloading Home Assistant automations, check the forecasts and price limits. The first wallbox calculation runs at 20:00 and the first battery check on the next full hour.
+After reloading Home Assistant automations, check the forecasts and price limits. The wallbox calculation runs daily at 20:00 and whenever a vehicle is connected; the first battery check runs on the next full hour.
 
 1. Configure the planner tariff and the desired PV-surplus rules for both wallboxes in EVCC. Check `KillerMinion` vehicle detection at loadpoint `SynBox-01` in EVCC.
 2. Both smart charging limits, `number.synboxen_battery_grid_charge_limit`, and the planner, PV and household-load forecasts must be available in Home Assistant.

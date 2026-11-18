@@ -31,7 +31,9 @@ EVCC entscheidet über die tatsächliche Ladung; eine Preisfreigabe garantiert k
 
 ### PV-Überschussregeln in EVCC
 
-Die Priorität für PV-Überschuss und die Lademodi werden weiterhin in EVCC konfiguriert. Täglich um 20:00 Uhr ermittelt Home Assistant die günstigsten 360 Minuten innerhalb der nächsten 24 Stunden aus dem Planner-Tarif. Der höchste Preis dieser Auswahl wird auf beide Smartladegrenzen gesetzt. Bei Preisgleichstand, durch Rundung oder bei langen Preisintervallen können mehr als 360 Minuten freigegeben werden; eine Preisgrenze legt keine exakten Ladezeiten fest.
+Die Priorität für PV-Überschuss und die Lademodi werden weiterhin in EVCC konfiguriert. Täglich um 20:00 Uhr und bei jedem Anschluss an eine der beiden Wallboxen ermittelt Home Assistant die günstigsten 360 Minuten innerhalb der nächsten 24 Stunden aus dem Planner-Tarif. Der höchste Preis dieser Auswahl wird auf beide Smartladegrenzen gesetzt. Bei Preisgleichstand, durch Rundung oder bei langen Preisintervallen können mehr als 360 Minuten freigegeben werden; eine Preisgrenze legt keine exakten Ladezeiten fest.
+
+Beim Anschluss schaltet Home Assistant den jeweiligen EVCC-Ladepunkt für 15 Minuten auf `now`, damit EVCC das Fahrzeug während eines tatsächlichen Ladevorgangs erkennen kann. Danach wird auf `smart` zurückgeschaltet, sofern das Fahrzeug noch angeschlossen ist; beim Abstecken erfolgt die Rückschaltung sofort. `now` kann während dieser Zeit unabhängig vom Preislimit laden. Die Automatik garantiert nicht, dass EVCC das Fahrzeug erkennt oder korrekt zuordnet.
 
 ### Hausbatterie aus dem Netz laden
 
@@ -61,7 +63,7 @@ Der Sperrwert beträgt `-0,5 €/kWh`, die kleinste einstellbare Smart-Preisgren
 
 ## 4. Einrichtung und Kontrolle
 
-Nach dem Neuladen der Home-Assistant-Automationen die Prognosen und Preisgrenzen prüfen. Die erste Wallboxberechnung erfolgt um 20:00 Uhr, die erste Batterieprüfung zur nächsten vollen Stunde.
+Nach dem Neuladen der Home-Assistant-Automationen die Prognosen und Preisgrenzen prüfen. Die Wallboxberechnung erfolgt täglich um 20:00 Uhr und zusätzlich beim Anschluss; die erste Batterieprüfung erfolgt zur nächsten vollen Stunde.
 
 1. In EVCC den Planner-Tarif und die gewünschten PV-Überschussregeln für beide Wallboxen konfigurieren. Die Fahrzeugerkennung für `KillerMinion` am Ladepunkt `SynBox-01` in EVCC prüfen.
 2. In Home Assistant müssen beide Smartladegrenzen, `number.synboxen_battery_grid_charge_limit`, Planner-, PV- und Hauslastprognose verfügbar sein.
