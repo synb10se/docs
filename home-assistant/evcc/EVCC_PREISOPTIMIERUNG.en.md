@@ -18,8 +18,8 @@ flowchart TD
 
     P["Electricity price forecast"] --> W24["Cheapest 360 minutes in next 24 hours"]
     W24 --> W
-    P --> P3["Three hours after current price interval"]
-    P3 --> G{"Battery at most 50%, current price lower, no PV surplus in 2 hours?"}
+    P --> P6["Cheapest 2 hours in the next 6 hours"]
+    P6 --> G{"18:00–06:00 or battery below 25% and no PV surplus in 3 hours?"}
     G -->|Yes| N["Enable home-battery grid charging"]
     G -->|No| X["Defer home-battery grid charging"]
     T["Household load and PV forecast"] --> G
@@ -37,7 +37,7 @@ When a vehicle is connected, Home Assistant sets that EVCC loadpoint to `now` fo
 
 ### Home Battery Grid Charging
 
-On the hour, grid charging is enabled when the battery is at most 50% charged, no PV surplus over the hourly household-load forecast is expected in the next two hours, and the current planner price is strictly below every price in the three hours following the current price interval. The automation sets `input_number.evcc_battery_grid_charge_price` and the actual EVCC grid-charge limit to the current price, rounded up to the supported step. Otherwise only the EVCC grid-charge limit is set to the blocking value; the last planned price remains unchanged.
+On the hour, the automation selects the cheapest two hours in the next six hours and sets `input_number.evcc_battery_grid_charge_price` and the EVCC grid-charge limit to the highest selected price, rounded up to the supported step. From 18:00 to 06:00 this applies regardless of battery charge and PV forecast; from 06:00 to 18:00 it applies only below 25% charge and when no PV surplus over the forecast household load is expected in the next three hours. Otherwise only the EVCC grid-charge limit is set to the blocking value; the last planned price remains unchanged. EVCC controls charging against the price limit within the hour. Ties, rounding or longer price intervals can allow more than two hours. Selection is recalculated hourly over a rolling window; two hours does not guarantee a charging duration or a full battery.
 
 ### Save Battery Energy for Price Peaks
 
@@ -57,7 +57,7 @@ Without a suitable model or temperature forecast, the calculation falls back to 
 
 ### Missing Data and Price Limits
 
-The wallbox calculation requires a complete 24-hour price forecast; otherwise both limits remain unchanged. The battery check requires valid charge and price readings, a full three-hour price forecast after the current interval, and two hours of PV and household-load forecasts. Missing data defers grid charging. PV surplus is a forecast, not a guarantee.
+The wallbox calculation requires a complete 24-hour price forecast; otherwise both limits remain unchanged. The battery check requires a complete six-hour price forecast; during the day it also requires a valid state of charge and three hours of PV and household-load forecasts. Missing required data defers grid charging. PV surplus is a forecast, not a guarantee.
 
 The blocking value is `-0.5 EUR/kWh`, the lowest configurable limit. At prices at or below this value it cannot reliably prevent grid charging. Enabled limits are rounded up to the EVCC step of `0.005 EUR/kWh`.
 

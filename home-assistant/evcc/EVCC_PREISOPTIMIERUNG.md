@@ -18,8 +18,8 @@ flowchart TD
 
     P["Strompreisprognose"] --> W24["Günstigste 360 Minuten der nächsten 24 Stunden"]
     W24 --> W
-    P --> P3["Nächste 3 Stunden nach aktuellem Preisintervall"]
-    P3 --> G{"Batterie höchstens 50 %, aktuell günstiger und kein PV-Überschuss in 2 Stunden?"}
+    P --> P6["Günstigste 2 Stunden der nächsten 6 Stunden"]
+    P6 --> G{"18–06 Uhr oder Batterie unter 25 % und kein PV-Überschuss in 3 Stunden?"}
     G -->|Ja| N["Hausbatterie-Netzladung freigeben"]
     G -->|Nein| X["Hausbatterie-Netzladung zurückstellen"]
     T["Hauslast- und PV-Prognose"] --> G
@@ -37,7 +37,7 @@ Beim Anschluss schaltet Home Assistant den jeweiligen EVCC-Ladepunkt für 15 Min
 
 ### Hausbatterie aus dem Netz laden
 
-Zur vollen Stunde wird die Netzladung freigegeben, wenn der Ladestand höchstens 50 % beträgt, für die nächsten zwei Stunden kein PV-Überschuss gegenüber der stündlichen Hauslast prognostiziert wird und der aktuelle Planner-Preis strikt unter allen Preisen der drei Stunden nach dem aktuellen Preisintervall liegt. Die Automation setzt dann `input_number.evcc_battery_grid_charge_price` und die tatsächliche EVCC-Netzladegrenze auf den aktuellen Preis, auf die Schrittweite aufgerundet. Andernfalls wird nur die EVCC-Netzladegrenze auf den Sperrwert gesetzt; der zuletzt geplante Preis bleibt erhalten.
+Zur vollen Stunde ermittelt die Automation aus den nächsten sechs Stunden die günstigsten zwei Stunden und setzt `input_number.evcc_battery_grid_charge_price` sowie die EVCC-Netzladegrenze auf den höchsten Preis dieser Auswahl, auf die Schrittweite aufgerundet. Von 18:00 bis 06:00 Uhr gilt dies unabhängig von Ladestand und PV-Prognose; von 06:00 bis 18:00 Uhr nur bei einem Ladestand unter 25 % und wenn in den nächsten drei Stunden kein PV-Überschuss gegenüber der prognostizierten Hauslast erwartet wird. Andernfalls wird nur die EVCC-Netzladegrenze auf den Sperrwert gesetzt; der zuletzt geplante Preis bleibt erhalten. EVCC steuert die Ladung anhand der Preisgrenze auch innerhalb der Stunde. Gleichstände, Rundung oder längere Preisintervalle können mehr als zwei Stunden freigeben. Die Auswahl wird stündlich mit einem neuen rollierenden Fenster berechnet; zwei Stunden sind keine garantierte Ladedauer oder Vollladung.
 
 ### Batterieenergie für Preisspitzen sparen
 
@@ -57,7 +57,7 @@ Fehlen ein geeignetes Modell oder eine Temperaturprognose, fällt die Berechnung
 
 ### Fehlende Daten und Preisgrenzen
 
-Die Wallboxberechnung benötigt eine vollständige 24-Stunden-Preisprognose; sonst bleiben beide Grenzen unverändert. Die Batterieprüfung benötigt gültigen Ladestand und Preis, drei vollständige Stunden Preisprognose nach dem aktuellen Intervall sowie zwei Stunden PV- und Hauslastprognose. Fehlen Daten, wird die Netzladung zurückgestellt. PV-Überschuss ist nur eine Prognose und keine Garantie.
+Die Wallboxberechnung benötigt eine vollständige 24-Stunden-Preisprognose; sonst bleiben beide Grenzen unverändert. Die Batterieprüfung benötigt sechs vollständige Stunden Preisprognose; tagsüber zusätzlich einen gültigen Ladestand sowie drei Stunden PV- und Hauslastprognose. Fehlen die jeweils benötigten Daten, wird die Netzladung zurückgestellt. PV-Überschuss ist nur eine Prognose und keine Garantie.
 
 Der Sperrwert beträgt `-0,5 €/kWh`, die kleinste einstellbare Smart-Preisgrenze. Bei Strompreisen auf oder unter diesem Wert kann er die Netzladung nicht zuverlässig sperren. Freigabegrenzen werden auf die evcc-Schrittweite von `0,005 €/kWh` aufgerundet. Bei nicht erreichbarer oder ungültiger Grenzwert-Entität kann die Automation den bestehenden Wert nicht ändern.
 
