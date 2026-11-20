@@ -43,7 +43,14 @@ Zur vollen Stunde ermittelt die Automation aus den nächsten sechs Stunden die g
 
 Bei einem SoC oberhalb des einstellbaren Grenzwerts darf die Hausbatterie jederzeit entladen. Am Grenzwert und darunter wird die Entladung auf die konfigurierbare Anzahl der teuersten Stunden im konfigurierbaren Preisprognosefenster beschränkt. Standardwerte sind 65 %, vier Stunden und zwölf Stunden. Die Regel hält den Batteriemodus außerhalb dieser Preisfenster auf `hold` und gibt ihn in den ausgewählten Stunden wieder frei. Während aktiver Netzladung greift die Entladesperre nicht. Bei ungültiger oder unvollständiger Preisprognose bleibt die Entladung unterhalb der SoC-Grenze gesperrt; bei deaktivierter Preisoptimierung wird eine eigene Sperre aufgehoben.
 
-Grenzwert, Anzahl der teuren Stunden und Prognosezeitraum können zusammen mit `input_boolean.evcc_smart_price_optimizer` im Dashboard **Energiestatistiken** angepasst werden. Die Auswahl bewertet Preisintervalle anhand ihrer Dauer; bei gleich teuren Intervallen entscheidet die Reihenfolge der Prognose.
+Diese Steuervariablen gehören ins Dashboard **SynHomeAutomation**, nicht in **Energiestatistiken**:
+
+- `input_boolean.evcc_smart_price_optimizer` – Preisoptimierung aktivieren
+- `input_number.evcc_battery_discharge_soc_threshold` – Entladegrenze SoC (Standard: 65 %)
+- `input_number.evcc_battery_discharge_peak_hours` – teuerste Entladestunden (Standard: 4 h)
+- `input_number.evcc_battery_discharge_forecast_hours` – Preisprognose Entladung (Standard: 12 h)
+
+Die Auswahl bewertet Preisintervalle anhand ihrer Dauer; bei gleich teuren Intervallen entscheidet die Reihenfolge der Prognose.
 
 ### Fahrzeugerkennung in EVCC
 

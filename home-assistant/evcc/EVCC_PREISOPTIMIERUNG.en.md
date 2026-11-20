@@ -43,7 +43,14 @@ On the hour, the automation selects the cheapest two hours in the next six hours
 
 The battery may discharge at any time above the configurable SoC threshold. At or below the threshold, discharge is limited to the configurable number of most expensive hours within the configurable price-forecast window. Defaults are 65%, four hours and twelve hours. The automation sets the battery mode to `hold` outside those price windows and releases it during the selected hours. It does not impose a discharge hold during active grid charging. If the price forecast is invalid or incomplete, discharge remains held below the SoC threshold; disabling price optimization releases a hold set by this automation.
 
-The threshold, number of expensive hours and forecast window can be adjusted on the **Energy Statistics** dashboard alongside `input_boolean.evcc_smart_price_optimizer`. Price intervals are ranked by their duration; forecast order breaks ties.
+These controls belong on the **SynHomeAutomation** dashboard, not **Energy Statistics**:
+
+- `input_boolean.evcc_smart_price_optimizer` – enable price optimization
+- `input_number.evcc_battery_discharge_soc_threshold` – discharge SoC threshold (default: 65%)
+- `input_number.evcc_battery_discharge_peak_hours` – most expensive discharge hours (default: 4 h)
+- `input_number.evcc_battery_discharge_forecast_hours` – price forecast window for discharge (default: 12 h)
+
+Price intervals are ranked by their duration; forecast order breaks ties.
 
 ### Vehicle Detection in EVCC
 
