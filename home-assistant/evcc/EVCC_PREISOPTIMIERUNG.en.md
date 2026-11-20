@@ -41,7 +41,9 @@ On the hour, the automation selects the cheapest two hours in the next six hours
 
 ### Save Battery Energy for Price Peaks
 
-The former automatic discharge hold is disabled. A hold it previously set is released at the next hourly check while battery optimization is enabled.
+The battery may discharge at any time above the configurable SoC threshold. At or below the threshold, discharge is limited to the configurable number of most expensive hours within the configurable price-forecast window. Defaults are 65%, four hours and twelve hours. The automation sets the battery mode to `hold` outside those price windows and releases it during the selected hours. It does not impose a discharge hold during active grid charging. If the price forecast is invalid or incomplete, discharge remains held below the SoC threshold; disabling price optimization releases a hold set by this automation.
+
+The threshold, number of expensive hours and forecast window can be adjusted on the **Energy Statistics** dashboard alongside `input_boolean.evcc_smart_price_optimizer`. Price intervals are ranked by their duration; forecast order breaks ties.
 
 ### Vehicle Detection in EVCC
 
